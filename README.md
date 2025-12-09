@@ -55,7 +55,7 @@ All data is stored in the `data/` directory by default (already in `.gitignore`)
 # 1. Download the dataset
 python src/s2orc/download_data.py --api-key YOUR_API_KEY
 
-# 2. Decompress files (optional)
+# 2. Decompress files
 bash src/s2orc/decompress_sequential.sh data/s2orc_papers
 
 # 3. Convert data to Pyserini format
