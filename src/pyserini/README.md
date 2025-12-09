@@ -2,6 +2,19 @@
 
 This directory contains scripts to convert S2ORC data to Pyserini format and build a searchable BM25 index.
 
+### Hardware Requirements
+
+We built this index in a 32 core 248GB RAM with no GPU machine. But upon observation only 50-60GB RAM was being used by pyserini at maximum usage.
+The file i/o speed seemed to be the major bottleneck then RAM usage
+
+Indexing:
+RAM: 60-80GB (During indexing)
+SSD: 3.5TB (We need to save intermediate files)
+
+Production:
+RAM: 8GB (To serve the API, general usage is around 2GB)
+SSD: 2TB (we need to store the data and the index)
+
 ### Prerequisites
 
 Install Pyserini and dependencies:
