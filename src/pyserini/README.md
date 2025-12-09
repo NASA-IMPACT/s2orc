@@ -99,6 +99,27 @@ python src/pyserini/search_pyserini.py \
 3. Retrieves full metadata from original files using document ID offsets
 4. Displays title, corpus ID, DOI, and ArXiv ID for each result
 
+### Step 4: Append New Documents to Existing Index (Optional)
+
+If you need to add new documents to an existing index without rebuilding from scratch:
+
+```bash
+python src/pyserini/append_to_pyserini_index.py \
+  --index s2orc_index \
+  --input new_documents.jsonl \
+  --threads 8
+```
+
+**Command-line Arguments:**
+- `--index` (required): Path to the existing Pyserini index
+- `--input` (required): Path to new JSONL file with documents to add
+- `--threads` (optional): Number of indexing threads (default: 1)
+
+**Use case:**
+- Add newly downloaded S2ORC papers to an existing index
+- Incrementally update the index without rebuilding everything
+- The new documents must be in the same JSONL format as Step 1
+
 ### Complete Workflow Example
 
 ```bash
@@ -117,6 +138,11 @@ python src/pyserini/search_pyserini.py \
   --index-path s2orc_index \
   --data-path s2orc_papers \
   --query "deep learning transformers"
+
+# Step 4 (Optional): Append new documents later
+python src/pyserini/append_to_pyserini_index.py \
+  --index s2orc_index \
+  --input new_documents.jsonl
 ```
 
 ### Directory Structure After Setup
