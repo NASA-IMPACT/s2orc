@@ -1,0 +1,8 @@
+requests
+tqdm
+ujson
+pyserini
+fastapi
+uvicorn[standard]
+pydantic
+
