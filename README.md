@@ -45,7 +45,7 @@ java -version
 
 1. [Download the Dataset](src/s2orc/README.md) - Download S2ORC data from Semantic Scholar
 2. [Build the Index](src/pyserini/README.md) - Convert data and build Pyserini search index
-3. [Run the FastAPI Server](src/api/README.md) - Set up API for searching the index
+3. [Run the FastAPI Server](src/server/README.md) - Set up API for searching the index
 
 ### Quick Start
 
