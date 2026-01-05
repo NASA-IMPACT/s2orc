@@ -19,6 +19,7 @@ def parse_args():
     parser.add_argument("--local-path", default="data/s2orc_papers", help="Local path to save downloaded files (default: data/s2orc_papers)")
     parser.add_argument("--max-workers", type=int, default=10, help="Maximum number of parallel download workers (default: 10)")
     parser.add_argument("--skip-verification", action="store_true", help="Skip verification step after download")
+    parser.add_argument("--limit", type=int, help="Limit number of files to download (useful for testing)")
     return parser.parse_args()
 
 
@@ -193,6 +194,7 @@ def main():
     local_path = args.local_path
     max_workers = args.max_workers
     skip_verification = args.skip_verification
+    limit = args.limit
 
     os.makedirs(local_path, exist_ok=True)
     metadata_path = f"{local_path}_metadata"
@@ -207,16 +209,22 @@ def main():
     with open(os.path.join(metadata_path, "download_links.json"), "w") as f:
         json.dump(response, f, indent=4)
 
-    print(f"\nStarting parallel download of {len(response['files'])} files with {max_workers} workers...")
+    # Limit files if specified (useful for testing)
+    files_to_download = response['files']
+    if limit:
+        files_to_download = files_to_download[:limit]
+        print(f"\n*** TEST MODE: Limiting to {limit} file(s) ***")
+
+    print(f"\nStarting parallel download of {len(files_to_download)} files with {max_workers} workers...")
 
     failed_downloads = []
     successful_downloads = []
     skipped_downloads = []
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_url = {executor.submit(download_file, url, local_path): url for url in response["files"]}
+        future_to_url = {executor.submit(download_file, url, local_path): url for url in files_to_download}
 
-        with tqdm(total=len(response["files"]), desc="Downloading files") as pbar:
+        with tqdm(total=len(files_to_download), desc="Downloading files") as pbar:
             for future in as_completed(future_to_url):
                 result = future.result()
                 pbar.update(1)
@@ -234,7 +242,7 @@ def main():
     print(f"  Successful: {len(successful_downloads)}")
     print(f"  Skipped (already exists): {len(skipped_downloads)}")
     print(f"  Failed: {len(failed_downloads)}")
-    print(f"  Total: {len(response['files'])}")
+    print(f"  Total: {len(files_to_download)}")
     print(f"{'='*60}")
 
     if failed_downloads:

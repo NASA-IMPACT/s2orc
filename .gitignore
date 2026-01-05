@@ -177,3 +177,8 @@ pyrightconfig.json
 
 # Data directory - contains downloaded papers, indexes, etc.
 data/
+.env.test
+.env.prod
+.env
+.env.local
+.env.dev
