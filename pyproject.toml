@@ -1,0 +1,48 @@
+[project]
+name = "s2orc-scholar-search"
+version = "1.0.0"
+description = "Download the S2ORC corpus, build a Pyserini (Lucene) BM25 index over it and serve the Scholar Search API"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    # data download and conversion
+    "requests>=2.32.5",
+    "tqdm>=4.67.0",
+    "ujson>=5.11.0",
+    "orjson>=3.11.0",
+    # indexing and search (bundles Anserini/Lucene; needs Java 21 at runtime)
+    "pyserini>=1.3.0",
+    # API server
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.9.0",
+    "gunicorn>=23.0.0",
+    "uvicorn-worker>=0.3.0",
+    "pystemmer>=3.0.0",
+    # listed explicitly only so the CPU-only wheel source below applies (uv sources
+    # apply to direct dependencies); pyserini pulls torch in anyway
+    "torch>=2.4.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+]
+
+[tool.uv]
+# This repo is a set of scripts, not an installable package.
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["src/server/tests"]
+
+# pyserini depends on torch (for its dense retrievers, unused here). Take the
+# CPU-only wheels so the lock, the venv and the Docker image skip ~5 GB of CUDA
+# libraries. Remove these two sections to get the default (GPU) torch.
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

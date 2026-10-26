@@ -11,16 +11,20 @@ def parse_args():
     parser.add_argument("--input-path", default="data/s2orc_pyserini_text", help="Path to converted JSONL files (default: data/s2orc_pyserini_text)")
     parser.add_argument("--index-path", default="data/s2orc_index", help="Output path for Pyserini index (default: data/s2orc_index)")
     parser.add_argument("--threads", type=int, default=20, help="Number of threads for indexing (default: 20)")
+    parser.add_argument("--fields", nargs="*", default=[], help="Extra JSON keys to index as separate Lucene fields besides 'contents', e.g. --fields title for the merged text+title collection")
+    parser.add_argument("--no-positions", action="store_true", help="Do not store term positions (smaller index; phrase queries unsupported)")
     return parser.parse_args()
 
 
-def build_index(jsonl_dir, index_dir, threads):
+def build_index(jsonl_dir, index_dir, threads, fields=(), store_positions=True):
     print("="*70)
     print("PYSERINI INDEX BUILDER")
     print("="*70)
     print(f"Input Directory: {jsonl_dir}")
     print(f"Index Directory: {index_dir}")
     print(f"Threads: {threads}")
+    print(f"Extra fields: {list(fields) or 'none'}")
+    print(f"Store positions: {store_positions}")
     print("="*70)
 
     if not jsonl_dir.exists():
@@ -58,8 +62,11 @@ def build_index(jsonl_dir, index_dir, threads):
         "--index", str(index_dir),
         "--generator", "DefaultLuceneDocumentGenerator",
         "--threads", str(threads),
-        "--storePositions",
     ]
+    if store_positions:
+        cmd.append("--storePositions")
+    if fields:
+        cmd.extend(["--fields", *fields])
 
     print("\nRunning Pyserini indexing command:")
     print(" ".join(cmd))
@@ -104,4 +111,4 @@ def build_index(jsonl_dir, index_dir, threads):
 
 if __name__ == "__main__":
     args = parse_args()
-    build_index(Path(args.input_path), Path(args.index_path), args.threads)
+    build_index(Path(args.input_path), Path(args.index_path), args.threads, args.fields, not args.no_positions)
