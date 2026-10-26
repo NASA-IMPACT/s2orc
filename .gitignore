@@ -177,3 +177,14 @@ pyrightconfig.json
 
 # Data directory - contains downloaded papers, indexes, etc.
 data/
+
+# Built artefacts of the server: DOI map, archives, gunicorn pid files
+*.sqlite
+*.sqlite.building
+*.tar.gz
+*.tar.bz2
+*.pid
+
+# Local secrets (API keys for the server)
+.scholar/
+api_keys*

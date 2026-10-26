@@ -5,4 +5,9 @@ pyserini
 fastapi
 uvicorn[standard]
 pydantic
+gunicorn
+uvicorn-worker
+orjson
+PyStemmer
+pytest
 
