@@ -1,5 +1,12 @@
 ## S2ORC Dataset Download and Verification
 
+The S2ORC full-text corpus from Semantic Scholar: 513 compressed archives that decompress to
+**~1.8 TB** of `.jsonl` (27.7M papers). Records come in two formats, `v1` and `v2`; one sample of
+each is in `docs/v1.json` and `docs/v2.json`. The decompressed files are needed permanently: the
+search index stores no text and the API reads results back from these files by byte offset.
+
+You need a Semantic Scholar API key: https://www.semanticscholar.org/product/api
+
 ### Prerequisites
 
 Install required Python packages:
@@ -84,6 +91,9 @@ The verification script will:
 - Generate detailed reports saved to the metadata directory
 - Display statistics including success rate and total data size
 
+Re-run the download command to fetch anything listed as missing or corrupted; files already
+present are skipped.
+
 ### Step 3: Decompress Files
 
 After downloading, you need to decompress the `.gz` files to `.jsonl` format. Two scripts are provided:
@@ -125,4 +135,10 @@ bash src/s2orc/decompress_parallel.sh s2orc_papers [parallel_jobs]
 - Deletes `.gz` files after successful decompression
 
 **Note:** The parallel version requires significantly more disk space as it decompresses multiple files simultaneously. Use the sequential version if disk space is limited.
+
+### Next step
+
+Convert the decompressed files to Pyserini documents and build the index:
+[src/pyserini/README.md](../pyserini/README.md), or follow [SETUP.md](../../SETUP.md) for the
+whole sequence.
 

@@ -4,24 +4,38 @@ This directory contains scripts to convert S2ORC data to Pyserini format and bui
 
 ### Hardware Requirements
 
-We built this index in a 32 core 248GB RAM with no GPU machine. But upon observation only 50-60GB RAM was being used by pyserini at maximum usage.
-The file i/o speed seemed to be the major bottleneck then RAM usage
+We built this index on a 32-core, 247 GB RAM machine with no GPU and a single NVMe volume. Pyserini
+used 50–60 GB of RAM at most; file I/O, not RAM, was the bottleneck throughout.
 
-Indexing:
-RAM: 60-80GB (During indexing)
-SSD: 3.5TB (We need to save intermediate files)
+Indexing (full corpus, 513 files, 27.7M papers):
+- RAM: 60–80 GB peak
+- Disk: ~4 TB while the intermediate files exist (raw 1.8 TB, converted text ~1 TB, titles 5 GB,
+  merged ~1 TB, index 60 GB). The converted collections can be deleted once the index is built.
 
 Production:
-RAM: 8GB (To serve the API, general usage is around 2GB)
-SSD: 2TB (we need to store the data and the index)
+- RAM: ~1.3 GB per API worker (16 workers ≈ 21 GB) plus page cache for the index; the 60 GB
+  two-field index fits in RAM on this machine, so warm queries never touch disk
+- Disk: ~2 TB (raw data 1.8 TB, which the API reads at query time, plus the 60 GB index and the
+  1.7 GB DOI map)
+
+Index sizes by build option:
+
+| Build | Size | Use |
+|---|---|---|
+| two-field (`--fields title --no-positions`) | 60 GB | what the API serves; no phrase queries |
+| full text with positions (default flags) | 247 GB | phrase queries from the command-line tool |
+| titles only | 3.5 GB | title search without the API |
 
 ### Prerequisites
 
-Install Pyserini and dependencies:
+Install Pyserini and dependencies (all included in `src/requirements.txt`):
 
 ```bash
 pip install pyserini ujson tqdm
 ```
+
+Pyserini needs Java 21 (see the [root README](../../README.md#java-21)). The end-to-end sequence
+with timings is in [SETUP.md](../../SETUP.md).
 
 ### Step 1: Convert S2ORC Data to Pyserini Format
 
@@ -56,6 +70,32 @@ The scripts convert S2ORC data files to Pyserini JSONL format:
 {"id": "filename___offset__version", "contents": "document text or title"}
 ```
 
+#### Option C (recommended for the API server): Merge Text and Title into One Two-Field Collection
+
+The search API in `src/server` searches title and body together with a title boost, which needs
+**one** index with a separate `title` field. Run both conversions above, then merge them:
+
+```bash
+python src/pyserini/convert_data_merge.py \
+  --text-path s2orc_pyserini_text \
+  --title-path s2orc_pyserini_title \
+  --output-path s2orc_pyserini_text_title \
+  --num-workers 8
+```
+
+**Command-line Arguments:**
+- `--text-path` (optional): Converted full-text files from Option A (default: `data/s2orc_pyserini_text`)
+- `--title-path` (optional): Converted title files from Option B (default: `data/s2orc_pyserini_title`)
+- `--output-path` (optional): Output directory (default: `data/s2orc_pyserini_text_title`)
+- `--num-workers` (optional): Number of parallel workers (default: 8)
+- `--limit` (optional): Only merge the first N files (for testing)
+
+The merge is resumable (files already present in the output directory are skipped) and documents
+are matched by `id`. Output:
+```json
+{"id": "filename___offset__version", "title": "paper title", "contents": "full text"}
+```
+
 ### Step 2: Build Pyserini Index
 
 After converting the data, build the Lucene index:
@@ -67,14 +107,29 @@ python src/pyserini/build_pyserini_index.py \
   --threads 20
 ```
 
+For the merged two-field collection (Option C), index the `title` key as its own field. Positions
+can be dropped too: the API does not use phrase queries and the index shrinks from ~250 GB to ~60 GB
+for the full corpus, small enough to sit in the page cache:
+
+```bash
+python src/pyserini/build_pyserini_index.py \
+  --input-path s2orc_pyserini_text_title \
+  --index-path s2orc_index \
+  --fields title \
+  --no-positions \
+  --threads 20
+```
+
 **Command-line Arguments:**
 - `--input-path` (required): Path to converted JSONL files from Step 1
 - `--index-path` (required): Output path for Pyserini index
 - `--threads` (optional): Number of indexing threads (default: 20)
+- `--fields` (optional): Extra JSON keys to index as separate Lucene fields besides `contents` (use `--fields title` for the merged collection)
+- `--no-positions` (optional): Do not store term positions (smaller index; phrase queries unsupported)
 
 **What this does:**
 - Creates a Lucene index optimized for BM25 search
-- Stores term positions for phrase queries
+- Stores term positions for phrase queries (unless `--no-positions`)
 - Does NOT store raw documents to save space
 
 ### Step 3: Search the Index
@@ -87,7 +142,8 @@ python src/pyserini/search_pyserini.py \
   --data-path s2orc_papers
 ```
 
-This launches an interactive prompt where you can enter queries.
+This launches an interactive prompt where you can enter queries. The tool searches the default
+`contents` field, so it works with any of the index builds above.
 
 #### Command-line Query Mode
 
@@ -136,15 +192,23 @@ python src/pyserini/append_to_pyserini_index.py \
 ### Complete Workflow Example
 
 ```bash
-# Step 1: Convert data (choose text or title)
+# Step 1: Convert data (text and title), then merge into one two-field collection
 python src/pyserini/convert_data_text.py \
   --input-path s2orc_papers \
   --output-path s2orc_pyserini_text
+python src/pyserini/convert_data_title.py \
+  --input-path s2orc_papers \
+  --output-path s2orc_pyserini_title
+python src/pyserini/convert_data_merge.py \
+  --text-path s2orc_pyserini_text \
+  --title-path s2orc_pyserini_title \
+  --output-path s2orc_pyserini_text_title
 
-# Step 2: Build index
+# Step 2: Build the two-field index (what src/server/api.py expects)
 python src/pyserini/build_pyserini_index.py \
-  --input-path s2orc_pyserini_text \
-  --index-path s2orc_index
+  --input-path s2orc_pyserini_text_title \
+  --index-path s2orc_index \
+  --fields title --no-positions
 
 # Step 3: Search
 python src/pyserini/search_pyserini.py \
@@ -164,8 +228,11 @@ python src/pyserini/append_to_pyserini_index.py \
 .
 ├── s2orc_papers/                    # Original downloaded data
 ├── s2orc_papers_metadata/           # Download metadata
-├── s2orc_pyserini_text/            # Converted JSONL files
-└── s2orc_index/                    # Pyserini index
+├── s2orc_pyserini_text/            # Converted JSONL files (full text)
+├── s2orc_pyserini_title/           # Converted JSONL files (titles)
+├── s2orc_pyserini_text_title/      # Merged two-field collection
+├── s2orc_index/                    # Pyserini index
+└── doi_map.sqlite                  # DOI lookup map for the API (src/server/build_doi_map.py)
 ```
 
 ### Notes
