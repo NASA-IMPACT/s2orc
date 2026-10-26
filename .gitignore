@@ -185,6 +185,7 @@ data/
 *.tar.bz2
 *.pid
 
-# Local secrets (API keys for the server)
+# Local secrets (API keys for the server) and environment file
+.env
 .scholar/
 api_keys*

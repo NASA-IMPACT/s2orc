@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# Start the scholar search API (src/server/api.py) under gunicorn.
+# Start the Scholar Search API (src/server/api.py) under gunicorn.
 #
-# Runs from the repo root whatever directory it is called from. Server
-# settings live in src/server/gunicorn.conf.py.
+# Runs from the repo root whatever directory it is called from. Python and all
+# packages come from uv (pyproject.toml + uv.lock): the script syncs the
+# environment and runs gunicorn through `uv run`, so a fresh checkout only
+# needs uv and Java 21. Server settings live in src/server/gunicorn.conf.py.
 #
-# Environment variables:
+# Configuration: environment variables, or a .env file at the repo root
+# (copy .env.example). Variables already set in the shell win over .env.
+#
 #   INDEX_DIR         Lucene index (contents + title fields)
 #                                         (default: data/s2orc_index; FULL_TEXT_INDEX_DIR also accepted)
 #   ORIGINAL_DATA_PATH
 #                     Decompressed S2ORC .jsonl files (default: data/s2orc_papers)
 #   DOI_MAP_PATH      SQLite DOI map from build_doi_map.py (default: data/doi_map.sqlite)
-#   PYTHON            Interpreter to use (default: <repo>/.venv/bin/python, else python3 on PATH)
 #   HOST              Bind address        (default: 0.0.0.0)
 #   PORT              Port                (default: 8000)
 #   WORKERS           Worker processes    (default: 16, see gunicorn.conf.py)
@@ -20,6 +23,8 @@
 #                     (default: ~/.scholar/api_keys when that file exists)
 #                     With no keys from either source the API is OPEN and a
 #                     warning is printed.
+#   PYTHON            Interpreter to use when uv is not installed
+#                     (default: <repo>/.venv/bin/python)
 #
 # Usage:
 #   src/server/start.sh
@@ -58,6 +63,7 @@
 #   Warm the page cache (after a start, a reboot, or a big disk job), while
 #   serving is fine:
 #       nohup src/server/cache_warm.sh > cache_warm.log 2>&1 &
+#   In Docker: docker compose up -d api / logs -f api / restart api (see docker-compose.yml).
 
 set -euo pipefail
 
@@ -65,22 +71,35 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$APP_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
+fail() { echo "ERROR: $*" >&2; exit 1; }
+
+# .env: KEY=VALUE lines, without overriding variables already set in the shell.
+if [ -f .env ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in ''|'#'*) continue ;; esac
+        key="${line%%=*}"; value="${line#*=}"
+        [ -z "${!key:-}" ] && export "$key=$value"
+    done < .env
+fi
+
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 
-fail() { echo "ERROR: $*" >&2; exit 1; }
-
-if [ -z "${PYTHON:-}" ]; then
-    if [ -x "$REPO_ROOT/.venv/bin/python" ]; then
-        PYTHON="$REPO_ROOT/.venv/bin/python"
-    else
-        PYTHON="$(command -v python3 || true)"
-    fi
+# Python: uv manages the environment from uv.lock. Without uv, fall back to an
+# existing interpreter ($PYTHON or the repo's .venv).
+if command -v uv >/dev/null 2>&1; then
+    uv sync --frozen --no-dev --quiet || fail "uv sync failed (is uv.lock present and the network reachable?)"
+    run_py() { uv run --frozen --no-dev python "$@"; }
+    PY_DESC="uv ($(uv run --frozen --no-dev python -c 'import sys; print(sys.executable)'))"
+else
+    PYTHON="${PYTHON:-$REPO_ROOT/.venv/bin/python}"
+    [ -x "$PYTHON" ] || fail "uv not found and no interpreter at $PYTHON. Install uv (https://docs.astral.sh/uv/) or set PYTHON."
+    run_py() { "$PYTHON" "$@"; }
+    PY_DESC="$PYTHON (uv not installed)"
 fi
-[ -n "$PYTHON" ] && [ -x "$PYTHON" ] || fail "No Python interpreter found. Create a venv (see README.md) or set PYTHON=/path/to/python"
 command -v java >/dev/null 2>&1 || fail "Java not found. Pyserini needs Java 21 (see README.md)."
-"$PYTHON" -c "import fastapi, gunicorn, uvicorn_worker, ujson, orjson, pyserini, Stemmer" 2>/dev/null \
-    || fail "Missing Python packages. Run: $PYTHON -m pip install -r src/requirements.txt"
+run_py -c "import fastapi, gunicorn, uvicorn_worker, ujson, orjson, pyserini, Stemmer" 2>/dev/null \
+    || fail "Missing Python packages. Run: uv sync"
 
 # Resolve the paths api.py will load (same defaults as api.py), so a missing
 # index fails here rather than as a stack trace from the server's startup hook.
@@ -89,6 +108,7 @@ ORIGINAL_DATA_PATH="${ORIGINAL_DATA_PATH:-$REPO_ROOT/data/s2orc_papers}"
 DOI_MAP_PATH="${DOI_MAP_PATH:-$REPO_ROOT/data/doi_map.sqlite}"
 [ -d "$INDEX_DIR" ] || fail "INDEX_DIR not found: $INDEX_DIR (build the index or set INDEX_DIR)"
 [ -d "$ORIGINAL_DATA_PATH" ] || fail "ORIGINAL_DATA_PATH not found: $ORIGINAL_DATA_PATH (set ORIGINAL_DATA_PATH)"
+printf '%-20s %s\n' "Python" "$PY_DESC"
 printf '%-20s %s\n' "INDEX_DIR" "$INDEX_DIR"
 printf '%-20s %s\n' "ORIGINAL_DATA_PATH" "$ORIGINAL_DATA_PATH"
 printf '%-20s %s\n' "DOI_MAP_PATH" "$DOI_MAP_PATH"
@@ -119,4 +139,4 @@ echo "Workers:             $WORKERS  (each ~1.3 GB; ready in ~15 s)"
 
 export HOST PORT WORKERS INDEX_DIR ORIGINAL_DATA_PATH DOI_MAP_PATH
 export PYTHONUNBUFFERED=1   # worker log lines appear immediately
-exec "$PYTHON" -m gunicorn -c "$APP_DIR/gunicorn.conf.py" api:app "$@"
+exec run_py -m gunicorn -c "$APP_DIR/gunicorn.conf.py" api:app "$@"

@@ -13,7 +13,7 @@
 # Pages stay cached until something else needs the memory (e.g. a 1 TB
 # conversion or index build), so re-run this after such jobs or after a reboot.
 #
-# Paths come from the same environment variables as api.py / start.sh:
+# Paths come from the same environment variables as api.py / start.sh (also read from .env):
 #   INDEX_DIR      (default: <repo>/data/s2orc_index; FULL_TEXT_INDEX_DIR also accepted)
 #   DOI_MAP_PATH   (default: <repo>/data/doi_map.sqlite)
 #
@@ -26,6 +26,16 @@ set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$APP_DIR/../.." && pwd)"
+cd "$REPO_ROOT"
+
+# .env: KEY=VALUE lines, without overriding variables already set in the shell.
+if [ -f .env ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in ''|'#'*) continue ;; esac
+        key="${line%%=*}"; value="${line#*=}"
+        [ -z "${!key:-}" ] && export "$key=$value"
+    done < .env
+fi
 
 if [ $# -ge 1 ]; then
     TARGETS=("$@")

@@ -1,0 +1,71 @@
+# Two services from one image (see Dockerfile):
+#
+#   api     serves the Scholar Search API on an existing index
+#   index   a shell with Java 21, uv and every script, for building the index
+#
+# Copy .env.example to .env and set the host paths there. The paths in .env are
+# HOST paths; inside the containers the same data is always at /data/... so
+# that no path ever has to be edited in the code.
+#
+#   docker compose build
+#   docker compose up -d api                                  # serve
+#   docker compose logs -f api
+#   docker compose run --rm index src/pyserini/build_index.sh # build the index (hours)
+#   docker compose run --rm index bash                        # explore / run single steps
+#   docker compose --profile index up ... is not needed; `run` starts the profile.
+
+services:
+  api:
+    build: .
+    image: s2orc-scholar-search
+    env_file:
+      - .env
+    environment:
+      # Container-side locations of the three artifacts mounted below.
+      INDEX_DIR: /data/index
+      ORIGINAL_DATA_PATH: /data/s2orc_papers
+      DOI_MAP_PATH: /data/doi_map.sqlite
+      HOST: 0.0.0.0
+      PORT: 8000
+      # Keys: either SCHOLAR_API_KEYS in .env, or a file mounted below.
+      SCHOLAR_API_KEYS_FILE: ${SCHOLAR_API_KEYS_FILE:+/run/secrets/api_keys}
+    volumes:
+      - ${INDEX_DIR:-./data/s2orc_index}:/data/index:ro
+      - ${ORIGINAL_DATA_PATH:-./data/s2orc_papers}:/data/s2orc_papers:ro
+      - ${DOI_MAP_PATH:-./data/doi_map.sqlite}:/data/doi_map.sqlite:ro
+      - ${SCHOLAR_API_KEYS_FILE:-/dev/null}:/run/secrets/api_keys:ro
+    ports:
+      - "${PORT:-8000}:8000"
+    ulimits:
+      nofile:
+        soft: 16384
+        hard: 16384
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 180s     # 16 workers each start a JVM
+      retries: 3
+    stop_grace_period: 40s   # gunicorn graceful_timeout is 30 s
+
+  index:
+    build: .
+    image: s2orc-scholar-search
+    profiles: ["index"]
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /data
+      # build_index.sh writes the finished artifacts here; they match what the
+      # api service mounts when .env keeps the defaults under DATA_DIR.
+      INDEX_DIR: /data/s2orc_index
+      ORIGINAL_DATA_PATH: /data/s2orc_papers
+      DOI_MAP_PATH: /data/doi_map.sqlite
+    volumes:
+      - ${DATA_DIR:-./data}:/data
+    working_dir: /app
+    entrypoint: []
+    command: ["bash"]
+    stdin_open: true
+    tty: true

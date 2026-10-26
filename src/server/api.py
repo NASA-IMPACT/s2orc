@@ -168,7 +168,7 @@ async def startup_event():
         print(f"auth: {len(API_KEYS)} API key(s) loaded")
     else:
         print("auth: WARNING no API keys configured (SCHOLAR_API_KEYS / SCHOLAR_API_KEYS_FILE); API is open")
-    if not Path(DOI_MAP_PATH).exists():
+    if not Path(DOI_MAP_PATH).is_file():
         print(f"doi: WARNING {DOI_MAP_PATH} not found; /doi will return 503 until build_doi_map.py has run")
 
 
@@ -696,7 +696,7 @@ def _doi_db() -> Optional[sqlite3.Connection]:
     """Per-thread read-only connection to the DOI map, or None if it has not been built."""
     conn = getattr(_doi_local, "conn", None)
     if conn is None:
-        if not Path(DOI_MAP_PATH).exists():
+        if not Path(DOI_MAP_PATH).is_file():
             return None
         conn = sqlite3.connect(f"file:{DOI_MAP_PATH}?mode=ro", uri=True, check_same_thread=False)
         _doi_local.conn = conn
@@ -742,7 +742,7 @@ async def health():
         "data_path": ORIGINAL_DATA_PATH,
         "searcher_initialized": searcher is not None,
         "num_docs": searcher.num_docs if searcher else 0,
-        "doi_map_exists": Path(DOI_MAP_PATH).exists(),
+        "doi_map_exists": Path(DOI_MAP_PATH).is_file(),
         "doi_map_path": str(DOI_MAP_PATH),
         "title_weight": TITLE_WEIGHT
     }

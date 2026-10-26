@@ -1,0 +1,22 @@
+# Data and build artifacts never go into the image; they are mounted at run time.
+data/
+*.sqlite
+*.sqlite.building
+*.tar.gz
+*.tar.bz2
+*.jsonl
+
+# Local environments, caches, logs, secrets
+.venv/
+.env
+.scholar/
+api_keys*
+__pycache__/
+*.py[oc]
+.pytest_cache/
+*.log
+*.pid
+.git/
+.github/
+.claude/
+docs/
