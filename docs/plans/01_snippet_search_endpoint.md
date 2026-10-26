@@ -1,15 +1,15 @@
-# Scholar Search API — Step 1: snippet search endpoint (`~/pindex`)
+# Scholar Search API — Step 1: snippet search endpoint (`s2orc`)
 
 ## Context
 
-The team wants one shared, high-throughput scholar search API. **All work happens in `/home/ec2-user/pindex`** (the pyserini/Lucene repo). The first deliverable is `/search/`: a snippet search that takes a query and returns a list of docs, each with a short passage showing where the query matches, with context before and after. Fulltext search, DOI lookup, bearer auth and gunicorn come later; their design is in `~/pindex/docs/plans/00_scholar_api_full_plan.md`.
+The team wants one shared, high-throughput scholar search API. **All work happens in the `s2orc` repo** (the pyserini/Lucene repo). The first deliverable is `/search/`: a snippet search that takes a query and returns a list of docs, each with a short passage showing where the query matches, with context before and after. Fulltext search, DOI lookup, bearer auth and gunicorn come later; their design is in `docs/plans/00_scholar_api_full_plan.md`.
 
 Decisions taken with the user:
 - The snippet route is **added to the existing `api.py` app** (one app, one JVM, one `start.sh`). The current `GET /search` (full documents) stays untouched until the `/fulltext/` step renames it.
 - **PyStemmer is added** (`uv add PyStemmer`) for exact stem-vs-stem matching in the snippet extractor. No orjson (ujson is already used and parsing is not the bottleneck).
 
-### What exists in `~/pindex`
-- `api.py`: FastAPI app with `GET /search?query=&k=&fields=&index_type=text|title` returning full documents. Reusable helpers: `read_json_at_offset()`, `get_version()`, `extract_document_fields()` (title/doi/authors/extra for v1 and v2), `retrieve_original_document()`. Doc id format `{filename}___{offset}__{version}`; raw data in `/home/ec2-user/s2orc_bm25index/data`.
+### What exists in `s2orc`
+- `api.py`: FastAPI app with `GET /search?query=&k=&fields=&index_type=text|title` returning full documents. Reusable helpers: `read_json_at_offset()`, `get_version()`, `extract_document_fields()` (title/doi/authors/extra for v1 and v2), `retrieve_original_document()`. Doc id format `{filename}___{offset}__{version}`; raw data in the directory given by `ORIGINAL_DATA_PATH`.
 - Indexes: full text `full_text_indexes/pyserini_index` (27.76M docs, 247 GB, positions stored, raw text not stored), title `indexes/pyserini_index_title` (26.4M docs, 3.5 GB).
 - Serving today: `start.sh` runs `uvicorn api:app` as a single foreground process (no systemd, no supervisor, no auth). It is currently running with `--reload` (PID 103749).
 - Snippets do not exist; raw text is not in Lucene, so snippets are computed from the JSONL record fetched by byte offset.
@@ -90,7 +90,7 @@ Serving as a team service (supervisor, gunicorn, auth) remains the later step; `
 5. `API_README.md` section with `./start.sh` and a curl example
 
 ## Verification
-- `cd ~/pindex && .venv/bin/python -m pytest tests/test_snippets.py`: window centred on the match (roughly equal context before and after), densest cluster beats a lone early match, stem matching ("resistance" query hits "resistant" text; "studies" hits "study"), front-matter skip, clamping at text start/end, word-boundary snapping and `…`, fallback, highlight, total length ≈ `snippet_chars`.
+- `uv run pytest src/server/tests/test_snippets.py`: window centred on the match (roughly equal context before and after), densest cluster beats a lone early match, stem matching ("resistance" query hits "resistant" text; "studies" hits "study"), front-matter skip, clamping at text start/end, word-boundary snapping and `…`, fallback, highlight, total length ≈ `snippet_chars`.
 - Existing `GET /search` still behaves exactly as before (same response for the same query).
 - Stop the current `--reload` server, `./start.sh` (and from another directory); log shows warm-up done, `GET /health` healthy, CPU idle at rest. `PORT=8002 ./start.sh` binds elsewhere; Ctrl-C stops it cleanly; `./start.sh --reload` no longer walks the data dirs.
 - `GET /search/?q=branched chain amino acid insulin resistance` → 10 docs, `content` contains the query terms with text on both sides, each doc has only title/doi/link/content/score, first title matches the top hit from the timing test; `offset=10` returns the next page with no overlap; `index=title` and `snippet_chars=150` behave as expected; missing `q` → 422.
