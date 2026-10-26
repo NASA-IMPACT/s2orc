@@ -168,7 +168,8 @@ All from the repo root; the pid file is `src/server/gunicorn-<PORT>.pid`.
 
 For a persistent service run `start.sh` from a systemd unit and put a reverse proxy in front for
 TLS. Throughput and latency figures are in
-[src/server/README.md](src/server/README.md#operations-notes).
+[src/server/README.md](src/server/README.md#operations-notes); how they were reached, and how to
+size a serving machine, is in [docs/OPTIMIZATION.md](docs/OPTIMIZATION.md).
 
 ## Adding newer papers later
 

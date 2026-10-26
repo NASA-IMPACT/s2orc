@@ -268,6 +268,9 @@ python src/server/tests/stress_test.py --url http://localhost:8000 --clients 100
 
 ### Operations notes
 
+The full performance record (what was tried, measurements, hardware sizing) is in
+[docs/OPTIMIZATION.md](../../docs/OPTIMIZATION.md).
+
 - Throughput scales with `WORKERS`: Lucene calls release the GIL, so each worker is limited by its
   Python work per request (~30 ms for parsing ten records and extracting passages). Each worker is
   ~1.3 GB RSS, so the default 16 use ~21 GB.

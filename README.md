@@ -20,6 +20,7 @@ gunicorn with bearer-token authentication.
 | [`src/pyserini/`](src/pyserini/README.md) | convert the data to Pyserini documents, build and query the Lucene index |
 | [`src/server/`](src/server/README.md) | the Scholar Search API: FastAPI app, snippet extraction, DOI map builder, gunicorn launcher, tests |
 | [`SETUP.md`](SETUP.md) | end-to-end setup guide with sizes, timings and operations notes |
+| [`docs/OPTIMIZATION.md`](docs/OPTIMIZATION.md) | performance work, measurements and hardware sizing for serving |
 | [`docs/plans/`](docs/plans/README.md) | design notes for the API |
 | `docs/v1.json`, `docs/v2.json` | one sample record of each S2ORC record format |
 | `src/requirements.txt` | Python dependencies |
