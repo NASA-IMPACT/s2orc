@@ -9,20 +9,35 @@ put things elsewhere.
 Plan for about **4 TB of disk** if you keep the intermediate files, or **2 TB** if you delete the
 converted collections after the index is built (see step 5).
 
+Steps 3, 4 and 6 are also wrapped in one script, `src/pyserini/build_index.sh`, which runs
+convert → merge → index → DOI map with the paths from `.env`; the individual commands are shown
+here so that each step can be understood and re-run on its own.
+
 ## 1. Prerequisites
 
+Either install the tools on the machine, or build the Docker image, which contains them all
+(details in [README.md](README.md#installation)):
+
 ```bash
-# Python environment (3.10+)
-uv venv && source .venv/bin/activate && uv pip install -r src/requirements.txt
-
-# Java 21 for Pyserini/Lucene (Amazon Linux 2023 shown; see README.md for other systems)
-sudo yum install -y java-21-amazon-corretto-devel
-sudo alternatives --set java /usr/lib/jvm/java-21-amazon-corretto.x86_64/bin/java
+# --- on the machine ---
+curl -LsSf https://astral.sh/uv/install.sh | sh          # uv; brings its own Python 3.13
+uv sync                                                  # .venv from uv.lock
+sudo yum install -y java-21-amazon-corretto-devel        # Java 21 for Pyserini/Lucene (Amazon Linux 2023;
+sudo alternatives --set java /usr/lib/jvm/java-21-amazon-corretto.x86_64/bin/java   # other systems: README.md)
 java -version
+sudo yum install -y pigz                                 # optional: parallel gzip for decompression
 
-# Optional: parallel gzip for faster decompression
-sudo yum install -y pigz
+# --- or Docker ---
+docker compose build                                     # Java 21 + uv + packages in one image
 ```
+
+Then copy `.env.example` to `.env` and set `DATA_DIR` (where everything below is written) and, if
+they differ from the defaults under it, `INDEX_DIR`, `ORIGINAL_DATA_PATH` and `DOI_MAP_PATH`. All
+scripts and docker compose read `.env`.
+
+With Docker, prefix every `python`/`bash` command below with `docker compose run --rm index`
+and use `/data/...` for the paths (the host `DATA_DIR` is mounted there), e.g.
+`docker compose run --rm index src/pyserini/build_index.sh`.
 
 A Semantic Scholar API key is needed for the download: https://www.semanticscholar.org/product/api.
 
@@ -131,19 +146,21 @@ prints a warning.
 ```bash
 src/server/start.sh                       # 0.0.0.0:8000, 16 workers
 PORT=8001 WORKERS=4 src/server/start.sh   # other port / fewer workers
+docker compose up -d api                  # the same, in Docker
 ```
 
-Paths are taken from the environment when the defaults don't apply:
+Paths come from `.env` (or the environment, which wins) when the defaults don't apply:
 
 ```bash
-export INDEX_DIR=/mnt/idx/s2orc_index
-export ORIGINAL_DATA_PATH=/mnt/data/s2orc_papers
-export DOI_MAP_PATH=/mnt/idx/doi_map.sqlite
-src/server/start.sh
+INDEX_DIR=/mnt/idx/s2orc_index
+ORIGINAL_DATA_PATH=/mnt/data/s2orc_papers
+DOI_MAP_PATH=/mnt/idx/doi_map.sqlite
 ```
 
-The launcher checks the interpreter, Java, packages, paths and port, then runs gunicorn. Each
-worker starts its own JVM (~1.3 GB RSS, ~15 s), so the service is up about 15 s after launch.
+The launcher syncs the uv environment from `uv.lock`, checks Java, packages, paths and port,
+then runs gunicorn through `uv run`. Each worker starts its own JVM (~1.3 GB RSS, ~15 s), so
+the service is up about 15 s after launch. In Docker the same script is the container command;
+the `.env` host paths are mounted read-only at `/data/...`.
 
 Verify:
 
@@ -159,7 +176,7 @@ All from the repo root; the pid file is `src/server/gunicorn-<PORT>.pid`.
 
 | Task | Command |
 |---|---|
-| Run detached | `nohup src/server/start.sh > server.log 2>&1 &` |
+| Run detached | `nohup src/server/start.sh > server.log 2>&1 &` (Docker: `docker compose up -d api`, logs with `docker compose logs -f api`) |
 | Reload code or keys (zero downtime) | `kill -HUP "$(cat src/server/gunicorn-8000.pid)"` |
 | Stop gracefully | `kill -TERM "$(cat src/server/gunicorn-8000.pid)"` |
 | Warm the page cache after a reboot or big disk job | `nohup src/server/cache_warm.sh > cache_warm.log 2>&1 &` (~8 min cold, safe while serving) |

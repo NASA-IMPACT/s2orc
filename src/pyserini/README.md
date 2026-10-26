@@ -28,14 +28,18 @@ Index sizes by build option:
 
 ### Prerequisites
 
-Install Pyserini and dependencies (all included in `src/requirements.txt`):
+Python packages come from uv (`uv sync` at the repo root, see the
+[root README](../../README.md#installation)); Pyserini needs Java 21. The Docker image has both:
+run any command below as `docker compose run --rm index <command>` with the data under `/data`.
+
+`build_index.sh` in this directory chains Steps 1–2 plus the DOI map with the paths from `.env`:
 
 ```bash
-pip install pyserini ujson tqdm
+src/pyserini/build_index.sh                 # convert, merge, index, doi
+src/pyserini/build_index.sh index doi       # only some steps
 ```
 
-Pyserini needs Java 21 (see the [root README](../../README.md#java-21)). The end-to-end sequence
-with timings is in [SETUP.md](../../SETUP.md).
+The end-to-end sequence with sizes and timings is in [SETUP.md](../../SETUP.md).
 
 ### Step 1: Convert S2ORC Data to Pyserini Format
 

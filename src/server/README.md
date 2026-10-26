@@ -32,11 +32,10 @@ Files in this directory:
 
 ### Prerequisites
 
-Python packages (also covered by `src/requirements.txt` at the repo root):
-
-```bash
-pip install fastapi uvicorn pyserini ujson orjson PyStemmer gunicorn uvicorn-worker
-```
+Python packages come from uv (`pyproject.toml` + `uv.lock` at the repo root): `uv sync` creates
+`.venv`, and `start.sh` runs gunicorn through `uv run`. Plain pip users can install
+`src/requirements.txt` (exported from the lock) into a Python 3.13 environment instead. The
+Docker image (`docker compose build`) contains everything including Java.
 
 Pyserini needs Java 21. The index must be the **two-field** index built from the merged
 text+title collection with `--fields title` (see [src/pyserini/README.md](../pyserini/README.md),
@@ -45,8 +44,9 @@ does not have.
 
 ### Configuration
 
-All paths are environment variables with defaults relative to the repo root, so the server works
-from any working directory:
+Settings are environment variables, read from `.env` at the repo root when present (copy
+`.env.example`; shell variables take precedence). Path defaults are relative to the repo root,
+so the server works from any working directory:
 
 | Variable | Default | Description |
 |---|---|---|
@@ -89,17 +89,27 @@ src/server/start.sh --reload                          # dev: restart workers on 
 src/server/cache_warm.sh                              # read the index into the page cache (safe while serving)
 ```
 
-`start.sh` checks the interpreter (`$PYTHON`, else `.venv/bin/python` at the repo root, else
-`python3`), Java, the required packages, the index/data paths and the port, then runs
-`gunicorn -c src/server/gunicorn.conf.py api:app`. Each worker starts its own JVM and Lucene
-searcher (~1.3 GB RSS, ~15 s); the service is ready about 15 s after launch. Server settings
-(timeouts, logging, pid file) are in `gunicorn.conf.py`. The header of `start.sh` documents how to
-reload (`kill -HUP`), stop and run detached.
+`start.sh` loads `.env`, runs `uv sync --frozen` so the environment matches `uv.lock`, checks
+Java, the required packages, the index/data paths and the port, then runs
+`gunicorn -c src/server/gunicorn.conf.py api:app` via `uv run`. Without uv it falls back to
+`$PYTHON` or `.venv/bin/python`. Each worker starts its own JVM and Lucene searcher (~1.3 GB
+RSS, ~15 s); the service is ready about 15 s after launch. Server settings (timeouts, logging,
+pid file) are in `gunicorn.conf.py`. The header of `start.sh` documents how to reload
+(`kill -HUP`), stop and run detached.
+
+Docker (same script inside the image; paths from `.env` mounted at `/data/...`):
+
+```bash
+docker compose up -d api
+docker compose logs -f api
+docker compose restart api        # after editing keys or .env
+docker compose down
+```
 
 Single process for development (uvicorn):
 
 ```bash
-uvicorn --app-dir src/server api:app --host 0.0.0.0 --port 8000
+uv run uvicorn --app-dir src/server api:app --host 0.0.0.0 --port 8000
 ```
 
 ### Authentication
@@ -294,31 +304,25 @@ The full performance record (what was tried, measurements, hardware sizing) is i
 - CORS is open to all origins (configure in `api.py` for production). Put a reverse proxy in front for
   TLS. For a persistent service, run `start.sh` from a systemd unit.
 
-### Using with Docker (Optional)
+### Docker
 
-Create a `.env` file:
+`Dockerfile` and `docker-compose.yml` at the repo root build one image (Eclipse Temurin Java 21,
+uv-managed Python 3.13, the locked packages) and define the `api` service on it:
 
-```env
-INDEX_DIR=/data/s2orc_index
-ORIGINAL_DATA_PATH=/data/s2orc_papers
-DOI_MAP_PATH=/data/doi_map.sqlite
-SCHOLAR_API_KEYS=key1,key2
-```
+- `.env` supplies the **host** paths `INDEX_DIR`, `ORIGINAL_DATA_PATH`, `DOI_MAP_PATH`, which
+  compose mounts read-only at `/data/index`, `/data/s2orc_papers`, `/data/doi_map.sqlite`; the
+  container-side variables are fixed to those paths.
+- Keys: `SCHOLAR_API_KEYS` in `.env`, or `SCHOLAR_API_KEYS_FILE=<host path>`, which is mounted at
+  `/run/secrets/api_keys`.
+- `PORT` in `.env` is the host port; the container always listens on 8000. `WORKERS` and the
+  `SCHOLAR_*` tuning variables pass straight through.
+- The service restarts unless stopped, has a `/health` healthcheck with a 3-minute start period
+  (JVM start per worker), a 40 s stop grace period for in-flight requests, and a raised open-file
+  limit for many concurrent connections.
 
-Example `docker-compose.yml`:
-
-```yaml
-version: '3.8'
-services:
-  api:
-    build: .
-    command: src/server/start.sh
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    volumes:
-      - ./data/s2orc_index:/data/s2orc_index
-      - ./data/s2orc_papers:/data/s2orc_papers
-      - ./data/doi_map.sqlite:/data/doi_map.sqlite
+```bash
+cp .env.example .env && $EDITOR .env
+docker compose build
+docker compose up -d api
+curl -s localhost:8000/health
 ```
