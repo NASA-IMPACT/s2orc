@@ -32,19 +32,39 @@ scripts' flags put them elsewhere.
 
 ### Hardware requirements
 
-Measured on a 32-core, 247 GB RAM machine with a single 5 TB NVMe volume:
+Two different jobs, two different machines. Building the index is a one-off batch job that
+needs lots of disk and a fair amount of RAM; serving needs enough RAM to keep the index in
+memory and a few cores per worker. The same box can do both, but a serving box does not need
+the build headroom.
 
-| Phase | RAM | Disk | Notes |
+**Building the index** (full corpus, 513 files, 27.7M papers):
+
+| Resource | Minimum | Comfortable | Why |
 |---|---|---|---|
-| Download + decompress | few GB | ~1.8 TB for the decompressed `.jsonl` files | disk-bound |
-| Convert + merge | few GB per worker | ~2 TB of intermediate files (full text ~1 TB, titles 5 GB, merged ~1 TB) | can be deleted after indexing |
-| Index build | 60–80 GB peak | 60 GB (two-field, no positions) or 247 GB (with positions) | file I/O is the bottleneck, not RAM |
-| DOI map | < 1 GB | 1.7 GB SQLite file | ~4–5 h, reads all raw data once |
-| Serving | ~1.3 GB per worker + page cache | raw data (1.8 TB) + index (60 GB) + DOI map | 16 workers ≈ 21 GB; the 60 GB index fits in the page cache |
+| Disk | 2.5 TB | 4 TB | 1.8 TB raw data, ~2 TB converted collections (deletable after the build), 60 GB index. With 2.5 TB, convert and index in batches or delete intermediates as you go |
+| RAM | 96 GB | 128 GB+ | the Lucene build peaks at 60–80 GB |
+| CPU | 8 cores | 16–32 cores | conversion runs 8 worker processes, indexing 20 threads; more cores shorten the ~12 h of batch work |
+| Disk speed | SSD | NVMe or gp3 at 250 MB/s+ | every step is bound by sequential read/write of the 1.8 TB |
+| Time | | ~1 day | download (bandwidth-bound) + convert and merge ~5 h + index ~3 h + DOI map ~4 h |
 
-The raw `.jsonl` files are needed at serving time: the index stores no text, and every search
-reads the matching records back from disk by byte offset. Sizing a serving machine is covered in
-[docs/OPTIMIZATION.md](docs/OPTIMIZATION.md#7-hardware-requirements-serving-only-no-index-builds).
+**Serving** (what the API reads: 1.8 TB raw data, 60 GB index, 1.7 GB DOI map):
+
+| Resource | Minimum | Recommended | Why |
+|---|---|---|---|
+| RAM | 64 GB | 128 GB | the 60 GB index must stay in the page cache to avoid 1–2 s cold queries; each worker adds ~1.3 GB. 64 GB serves a few users with cold-cache stalls; 128 GB holds the index plus 8–16 workers |
+| CPU | 4 vCPU | 16–32 vCPU | ~22 `/search` req/s per worker; run one worker per two vCPUs (`WORKERS`). 16 workers ≈ 355 req/s |
+| Disk | 2 TB | 2.5 TB SSD, 6,000 IOPS+ | results are random 50–500 KB record reads from the raw data; IOPS matter more than bandwidth |
+| Network | 1 Gbit/s | | responses are 7–700 KB |
+
+On AWS that is roughly an `r6i.4xlarge` (16 vCPU, 128 GB) for a small team or an
+`m6i.8xlarge` (32 vCPU, 128 GB) for the measured throughput, each with a gp3 volume. The raw
+`.jsonl` files are needed at serving time: the index stores no text, and every search reads the
+matching records back from disk by byte offset. Sizing details and the measurements behind them
+are in [docs/OPTIMIZATION.md](docs/OPTIMIZATION.md#7-hardware-requirements-serving-only-no-index-builds).
+
+For reference, everything in this repo was built and measured on one AWS `r6i.8xlarge`:
+32 vCPU, 247 GB RAM, a single 5 TB gp3 volume (~125 MB/s sustained), no GPU. That machine is
+larger than needed; about 150 GB of its RAM sat unused while serving.
 
 ### Installation
 
