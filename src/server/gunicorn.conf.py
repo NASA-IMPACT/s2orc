@@ -1,7 +1,7 @@
 """
 Gunicorn configuration for the scholar search API.
 
-    gunicorn -c src/server/gunicorn.conf.py api:app      (src/server/start.sh does this)
+    gunicorn -c src/server/gunicorn.conf.py api:app      (./start.sh does this)
 
 Run it from the repo root: `pythonpath` below adds src/server to sys.path so
 `api:app` resolves, and the default data paths in api.py are anchored at the

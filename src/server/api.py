@@ -3,7 +3,7 @@
 Scholar Search: FastAPI server over a Pyserini (Lucene) BM25 index of S2ORC papers.
 
 Usage (from the repo root):
-    src/server/start.sh                                   # gunicorn, see src/server/README.md
+    ./start.sh                                   # gunicorn, see src/server/README.md
     uvicorn --app-dir src/server api:app --host 0.0.0.0   # single dev process
 
 Paths (environment variables, defaults relative to the repo root):

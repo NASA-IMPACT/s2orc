@@ -110,5 +110,5 @@ done
 
 echo
 echo "== $(stamp) done"
-echo "Serve with:  INDEX_DIR=$INDEX_DIR ORIGINAL_DATA_PATH=$ORIGINAL_DATA_PATH DOI_MAP_PATH=$DOI_MAP_PATH src/server/start.sh"
-echo "(or put those three in .env and run src/server/start.sh / docker compose up -d api)"
+echo "Serve with:  INDEX_DIR=$INDEX_DIR ORIGINAL_DATA_PATH=$ORIGINAL_DATA_PATH DOI_MAP_PATH=$DOI_MAP_PATH ./start.sh"
+echo "(or put those three in .env and run ./start.sh / docker compose up -d api)"

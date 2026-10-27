@@ -144,8 +144,8 @@ prints a warning.
 ## 8. Run the API
 
 ```bash
-src/server/start.sh                       # 0.0.0.0:8000, 16 workers
-PORT=8001 WORKERS=4 src/server/start.sh   # other port / fewer workers
+./start.sh                       # 0.0.0.0:8000, 16 workers
+PORT=8001 WORKERS=4 ./start.sh   # other port / fewer workers
 docker compose up -d api                  # the same, in Docker
 ```
 
@@ -176,7 +176,7 @@ All from the repo root; the pid file is `src/server/gunicorn-<PORT>.pid`.
 
 | Task | Command |
 |---|---|
-| Run detached | `nohup src/server/start.sh > server.log 2>&1 &` (Docker: `docker compose up -d api`, logs with `docker compose logs -f api`) |
+| Run detached | `nohup ./start.sh > server.log 2>&1 &` (Docker: `docker compose up -d api`, logs with `docker compose logs -f api`) |
 | Reload code or keys (zero downtime) | `kill -HUP "$(cat src/server/gunicorn-8000.pid)"` |
 | Stop gracefully | `kill -TERM "$(cat src/server/gunicorn-8000.pid)"` |
 | Warm the page cache after a reboot or big disk job | `nohup src/server/cache_warm.sh > cache_warm.log 2>&1 &` (~8 min cold, safe while serving) |
