@@ -33,6 +33,8 @@
 #   INDEX_DIR=/mnt/idx ORIGINAL_DATA_PATH=/mnt/s2orc ./start.sh
 #   ./start.sh --reload      # dev: restart workers when a loaded .py changes
 #                                     # (extra arguments are passed to gunicorn)
+#   ./start.sh --warm-cache  # also run src/server/cache_warm.sh in the background
+#                                     # (off by default; logs to cache_warm.log)
 #
 # Workers: each one starts its own JVM and opens its own Lucene searcher
 # (~1.3 GB RSS and ~15 s startup per worker), so the service is ready about
@@ -61,7 +63,7 @@
 #       pgrep -f "gunicorn -c .*gunicorn.conf.py" | head -1
 #   Keys: edit ~/.scholar/api_keys, then HUP to reload them.
 #   Warm the page cache (after a start, a reboot, or a big disk job), while
-#   serving is fine:
+#   serving is fine (or start with --warm-cache to do it at launch):
 #       nohup src/server/cache_warm.sh > cache_warm.log 2>&1 &
 #   In Docker: docker compose up -d api / logs -f api / restart api (see docker-compose.yml).
 
@@ -72,6 +74,16 @@ APP_DIR="$REPO_ROOT/src/server"
 cd "$REPO_ROOT"
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
+
+# --warm-cache is ours; every other argument goes to gunicorn.
+WARM_CACHE=0
+GUNICORN_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --warm-cache) WARM_CACHE=1 ;;
+        *) GUNICORN_ARGS+=("$arg") ;;
+    esac
+done
 
 # .env: KEY=VALUE lines, without overriding variables already set in the shell.
 if [ -f .env ]; then
@@ -89,16 +101,16 @@ PORT="${PORT:-8000}"
 # existing interpreter ($PYTHON or the repo's .venv).
 if command -v uv >/dev/null 2>&1; then
     uv sync --frozen --no-dev --quiet || fail "uv sync failed (is uv.lock present and the network reachable?)"
-    run_py() { uv run --frozen --no-dev python "$@"; }
-    PY_DESC="uv ($(uv run --frozen --no-dev python -c 'import sys; print(sys.executable)'))"
+    PY_CMD=(uv run --frozen --no-dev python)
+    PY_DESC="uv ($("${PY_CMD[@]}" -c 'import sys; print(sys.executable)'))"
 else
     PYTHON="${PYTHON:-$REPO_ROOT/.venv/bin/python}"
     [ -x "$PYTHON" ] || fail "uv not found and no interpreter at $PYTHON. Install uv (https://docs.astral.sh/uv/) or set PYTHON."
-    run_py() { "$PYTHON" "$@"; }
+    PY_CMD=("$PYTHON")
     PY_DESC="$PYTHON (uv not installed)"
 fi
 command -v java >/dev/null 2>&1 || fail "Java not found. Pyserini needs Java 21 (see README.md)."
-run_py -c "import fastapi, gunicorn, uvicorn_worker, ujson, orjson, pyserini, Stemmer" 2>/dev/null \
+"${PY_CMD[@]}" -c "import fastapi, gunicorn, uvicorn_worker, ujson, orjson, pyserini, Stemmer" 2>/dev/null \
     || fail "Missing Python packages. Run: uv sync"
 
 # Resolve the paths api.py will load (same defaults as api.py), so a missing
@@ -139,4 +151,12 @@ echo "Workers:             $WORKERS  (each ~1.3 GB; ready in ~15 s)"
 
 export HOST PORT WORKERS INDEX_DIR ORIGINAL_DATA_PATH DOI_MAP_PATH
 export PYTHONUNBUFFERED=1   # worker log lines appear immediately
-exec run_py -m gunicorn -c "$APP_DIR/gunicorn.conf.py" api:app "$@"
+
+if [ "$WARM_CACHE" = 1 ]; then
+    # Detached (subshell + nohup) so it is not a child of the gunicorn master.
+    # It only reads, at idle I/O priority, so serving can start right away.
+    ( nohup "$APP_DIR/cache_warm.sh" > "$REPO_ROOT/cache_warm.log" 2>&1 & )
+    echo "Cache warm:          running in background, log: $REPO_ROOT/cache_warm.log"
+fi
+# A command array, not a function: exec only runs programs.
+exec "${PY_CMD[@]}" -m gunicorn -c "$APP_DIR/gunicorn.conf.py" api:app ${GUNICORN_ARGS[@]+"${GUNICORN_ARGS[@]}"}

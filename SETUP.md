@@ -179,7 +179,7 @@ All from the repo root; the pid file is `src/server/gunicorn-<PORT>.pid`.
 | Run detached | `nohup ./start.sh > server.log 2>&1 &` (Docker: `docker compose up -d api`, logs with `docker compose logs -f api`) |
 | Reload code or keys (zero downtime) | `kill -HUP "$(cat src/server/gunicorn-8000.pid)"` |
 | Stop gracefully | `kill -TERM "$(cat src/server/gunicorn-8000.pid)"` |
-| Warm the page cache after a reboot or big disk job | `nohup src/server/cache_warm.sh > cache_warm.log 2>&1 &` (~8 min cold, safe while serving) |
+| Warm the page cache after a reboot or big disk job | `nohup src/server/cache_warm.sh > cache_warm.log 2>&1 &` (~8 min cold, safe while serving), or start with `./start.sh --warm-cache` |
 | Load test | `python src/server/tests/stress_test.py --url http://localhost:8000 --clients 100 --seconds 45` |
 | Unit tests | `pytest src/server/tests/test_snippets.py` |
 
