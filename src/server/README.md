@@ -24,7 +24,7 @@ Files in this directory:
 | `api.py` | the FastAPI app |
 | `snippets.py` | passage extraction for `/search` (pure Python, unit-tested, no JVM) |
 | `build_doi_map.py` | one-off builder of the DOI → record map used by `/doi/{doi}` |
-| `start.sh`, `gunicorn.conf.py` | production launcher and gunicorn settings |
+| `gunicorn.conf.py` | gunicorn settings (launched by `./start.sh` at the repo root) |
 | `cache_warm.sh` | reads the index into the OS page cache |
 | `api_client_example.py` | runnable Python client |
 | `tests/test_snippets.py` | unit tests for `snippets.py` |
@@ -82,10 +82,10 @@ python src/server/build_doi_map.py --classification docs/dataset_classification.
 Production (gunicorn, from the repo root):
 
 ```bash
-src/server/start.sh                                   # http://0.0.0.0:8000, 16 workers, keys from ~/.scholar/api_keys
-PORT=8001 WORKERS=2 src/server/start.sh               # other port / worker count
-SCHOLAR_API_KEYS=key1,key2 src/server/start.sh        # keys from the environment instead
-src/server/start.sh --reload                          # dev: restart workers on code change
+./start.sh                                   # http://0.0.0.0:8000, 16 workers, keys from ~/.scholar/api_keys
+PORT=8001 WORKERS=2 ./start.sh               # other port / worker count
+SCHOLAR_API_KEYS=key1,key2 ./start.sh        # keys from the environment instead
+./start.sh --reload                          # dev: restart workers on code change
 src/server/cache_warm.sh                              # read the index into the page cache (safe while serving)
 ```
 

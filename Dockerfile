@@ -43,7 +43,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv python install && uv sync --frozen --no-dev
 
 COPY src ./src
-COPY README.md SETUP.md ./
+COPY README.md SETUP.md start.sh ./
 
 ENV PATH="/opt/venv/bin:${PATH}" \
     PYTHON=/opt/venv/bin/python \
@@ -59,4 +59,4 @@ ENV PATH="/opt/venv/bin:${PATH}" \
 EXPOSE 8000
 
 # Serve by default; `docker compose run index ...` overrides the command.
-CMD ["src/server/start.sh"]
+CMD ["./start.sh"]

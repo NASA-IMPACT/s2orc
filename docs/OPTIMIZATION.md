@@ -266,6 +266,6 @@ scale with memory.
    (or place them at the defaults under `data/`).
 2. Java 21, `uv venv && uv pip install -r src/requirements.txt` (see [SETUP.md](../SETUP.md)).
 3. Keys in `~/.scholar/api_keys` (one per caller).
-4. `WORKERS=<vCPU/2> nohup src/server/start.sh > server.log 2>&1 &`
+4. `WORKERS=<vCPU/2> nohup ./start.sh > server.log 2>&1 &`
 5. `src/server/cache_warm.sh` (≈8 min from cold), then `python src/server/tests/stress_test.py`
    to confirm numbers.
