@@ -99,7 +99,7 @@ for step in "${STEPS[@]}"; do
             ;;
         index)
             [ -d "$MERGED_DIR" ] || fail "$MERGED_DIR not found (run the merge step)"
-            py src/pyserini/build_pyserini_index.py --input-path "$MERGED_DIR" --index-path "$INDEX_DIR" --fields title --no-positions --threads "$INDEX_THREADS"
+            py src/pyserini/build_pyserini_index.py --input-path "$MERGED_DIR" --index-path "$INDEX_DIR" --fields title --threads "$INDEX_THREADS"
             ;;
         doi)
             [ -d "$ORIGINAL_DATA_PATH" ] || fail "ORIGINAL_DATA_PATH not found: $ORIGINAL_DATA_PATH"

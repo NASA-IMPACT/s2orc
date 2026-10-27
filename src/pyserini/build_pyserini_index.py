@@ -12,11 +12,11 @@ def parse_args():
     parser.add_argument("--index-path", default="data/s2orc_index", help="Output path for Pyserini index (default: data/s2orc_index)")
     parser.add_argument("--threads", type=int, default=20, help="Number of threads for indexing (default: 20)")
     parser.add_argument("--fields", nargs="*", default=[], help="Extra JSON keys to index as separate Lucene fields besides 'contents', e.g. --fields title for the merged text+title collection")
-    parser.add_argument("--no-positions", action="store_true", help="Do not store term positions (smaller index; phrase queries unsupported)")
+    parser.add_argument("--positions", action="store_true", help="Store term positions (needed for phrase queries; index grows ~4x)")
     return parser.parse_args()
 
 
-def build_index(jsonl_dir, index_dir, threads, fields=(), store_positions=True):
+def build_index(jsonl_dir, index_dir, threads, fields=(), store_positions=False):
     print("="*70)
     print("PYSERINI INDEX BUILDER")
     print("="*70)
@@ -111,4 +111,4 @@ def build_index(jsonl_dir, index_dir, threads, fields=(), store_positions=True):
 
 if __name__ == "__main__":
     args = parse_args()
-    build_index(Path(args.input_path), Path(args.index_path), args.threads, args.fields, not args.no_positions)
+    build_index(Path(args.input_path), Path(args.index_path), args.threads, args.fields, args.positions)
