@@ -86,7 +86,7 @@ Production (gunicorn, from the repo root):
 PORT=8001 WORKERS=2 ./start.sh               # other port / worker count
 SCHOLAR_API_KEYS=key1,key2 ./start.sh        # keys from the environment instead
 ./start.sh --reload                          # dev: restart workers on code change
-./start.sh --warm-cache                      # also warm the page cache in the background (log: cache_warm.log)
+./start.sh --cache-warm                      # also warm the page cache in the background (log: cache_warm.log)
 src/server/cache_warm.sh                              # read the index into the page cache (safe while serving)
 ```
 

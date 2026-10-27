@@ -6,8 +6,9 @@
 # environment and runs gunicorn through `uv run`, so a fresh checkout only
 # needs uv and Java 21. Server settings live in src/server/gunicorn.conf.py.
 #
-# Configuration: environment variables, or a .env file at the repo root
-# (copy .env.example). Variables already set in the shell win over .env.
+# Configuration: command-line flags (./start.sh --help), environment
+# variables, or a .env file at the repo root (copy .env.example), in that
+# order of precedence. Each flag sets the variable named next to it.
 #
 #   INDEX_DIR         Lucene index (contents + title fields)
 #                                         (default: data/s2orc_index; FULL_TEXT_INDEX_DIR also accepted)
@@ -23,18 +24,22 @@
 #                     (default: ~/.scholar/api_keys when that file exists)
 #                     With no keys from either source the API is OPEN and a
 #                     warning is printed.
+#   SCHOLAR_THREADS   Search threads per worker (default: 40)
+#   SCHOLAR_TITLE_WEIGHT
+#                     Title-field boost in BM25 scoring (default: 2.0)
+#   LOG_LEVEL         gunicorn log level (default: info)
 #   PYTHON            Interpreter to use when uv is not installed
 #                     (default: <repo>/.venv/bin/python)
 #
 # Usage:
 #   ./start.sh
-#   PORT=8001 WORKERS=2 ./start.sh
+#   ./start.sh --port 8001 --workers 2        # same as PORT=8001 WORKERS=2 ./start.sh
+#   ./start.sh --index-dir /mnt/idx --data-dir /mnt/s2orc
 #   SCHOLAR_API_KEYS=team-key-1,team-key-2 ./start.sh
-#   INDEX_DIR=/mnt/idx ORIGINAL_DATA_PATH=/mnt/s2orc ./start.sh
-#   ./start.sh --reload      # dev: restart workers when a loaded .py changes
-#                                     # (extra arguments are passed to gunicorn)
-#   ./start.sh --warm-cache  # also run src/server/cache_warm.sh in the background
+#   ./start.sh --cache-warm  # also run src/server/cache_warm.sh in the background
 #                                     # (off by default; logs to cache_warm.log)
+#   ./start.sh --reload      # dev: restart workers when a loaded .py changes
+#                                     # (unknown arguments, and all after --, go to gunicorn)
 #
 # Workers: each one starts its own JVM and opens its own Lucene searcher
 # (~1.3 GB RSS and ~15 s startup per worker), so the service is ready about
@@ -63,7 +68,7 @@
 #       pgrep -f "gunicorn -c .*gunicorn.conf.py" | head -1
 #   Keys: edit ~/.scholar/api_keys, then HUP to reload them.
 #   Warm the page cache (after a start, a reboot, or a big disk job), while
-#   serving is fine (or start with --warm-cache to do it at launch):
+#   serving is fine (or start with --cache-warm to do it at launch):
 #       nohup src/server/cache_warm.sh > cache_warm.log 2>&1 &
 #   In Docker: docker compose up -d api / logs -f api / restart api (see docker-compose.yml).
 
@@ -75,14 +80,62 @@ cd "$REPO_ROOT"
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
 
-# --warm-cache is ours; every other argument goes to gunicorn.
-WARM_CACHE=0
+usage() {
+    cat <<'USAGE'
+Usage: ./start.sh [options] [gunicorn arguments...]
+
+Start the Scholar Search API under gunicorn. Each option sets the environment
+variable in brackets and wins over the shell environment and .env.
+
+  --host ADDR          bind address                    [HOST, default 0.0.0.0]
+  --port N             port                            [PORT, default 8000]
+  --workers N          worker processes, ~1.3 GB each  [WORKERS, default 16]
+  --threads N          search threads per worker       [SCHOLAR_THREADS, default 40]
+  --index-dir DIR      Lucene index                    [INDEX_DIR, default data/s2orc_index]
+  --data-dir DIR       decompressed S2ORC .jsonl files [ORIGINAL_DATA_PATH, default data/s2orc_papers]
+  --doi-map FILE       SQLite DOI map                  [DOI_MAP_PATH, default data/doi_map.sqlite]
+  --keys-file FILE     API keys, one per line          [SCHOLAR_API_KEYS_FILE, default ~/.scholar/api_keys]
+  --title-weight X     title-field boost               [SCHOLAR_TITLE_WEIGHT, default 2.0]
+  --log-level LEVEL    gunicorn log level              [LOG_LEVEL, default info]
+  --cache-warm         also read the index into the page cache in the
+                       background (src/server/cache_warm.sh, log: cache_warm.log)
+  -h, --help           show this help
+
+Options take "--opt value" or "--opt=value". Unknown arguments, and everything
+after "--", are passed to gunicorn (e.g. --reload). See the top of start.sh for
+managing a running server.
+USAGE
+}
+
+# Flags set their environment variable before .env is read, so they win.
+CACHE_WARM=0
 GUNICORN_ARGS=()
-for arg in "$@"; do
-    case "$arg" in
-        --warm-cache) WARM_CACHE=1 ;;
-        *) GUNICORN_ARGS+=("$arg") ;;
+while [ $# -gt 0 ]; do
+    opt="$1"; val=""; has_val=0
+    case "$opt" in --*=*) val="${opt#*=}"; opt="${opt%%=*}"; has_val=1 ;; esac
+    var=""
+    case "$opt" in
+        -h|--help)      usage; exit 0 ;;
+        --cache-warm)   CACHE_WARM=1; shift; continue ;;
+        --)             shift; GUNICORN_ARGS+=("$@"); break ;;
+        --host)         var=HOST ;;
+        --port)         var=PORT ;;
+        --workers)      var=WORKERS ;;
+        --threads)      var=SCHOLAR_THREADS ;;
+        --index-dir)    var=INDEX_DIR ;;
+        --data-dir)     var=ORIGINAL_DATA_PATH ;;
+        --doi-map)      var=DOI_MAP_PATH ;;
+        --keys-file)    var=SCHOLAR_API_KEYS_FILE ;;
+        --title-weight) var=SCHOLAR_TITLE_WEIGHT ;;
+        --log-level)    var=LOG_LEVEL ;;
+        *)              GUNICORN_ARGS+=("$1"); shift; continue ;;
     esac
+    if [ "$has_val" = 0 ]; then
+        [ $# -ge 2 ] || fail "$opt needs a value (see ./start.sh --help)"
+        val="$2"; shift
+    fi
+    shift
+    export "$var=$val"
 done
 
 # .env: KEY=VALUE lines, without overriding variables already set in the shell.
@@ -152,7 +205,7 @@ echo "Workers:             $WORKERS  (each ~1.3 GB; ready in ~15 s)"
 export HOST PORT WORKERS INDEX_DIR ORIGINAL_DATA_PATH DOI_MAP_PATH
 export PYTHONUNBUFFERED=1   # worker log lines appear immediately
 
-if [ "$WARM_CACHE" = 1 ]; then
+if [ "$CACHE_WARM" = 1 ]; then
     # Detached (subshell + nohup) so it is not a child of the gunicorn master.
     # It only reads, at idle I/O priority, so serving can start right away.
     ( nohup "$APP_DIR/cache_warm.sh" > "$REPO_ROOT/cache_warm.log" 2>&1 & )
