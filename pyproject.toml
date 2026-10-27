@@ -17,6 +17,9 @@ dependencies = [
     "uvicorn[standard]>=0.34.0",
     "pydantic>=2.9.0",
     "gunicorn>=23.0.0",
+    # raw records on S3 (repack_raw_to_s3.py, api.py)
+    "boto3>=1.35.0",
+    "zstandard>=0.23.0",
     "uvicorn-worker>=0.3.0",
     "pystemmer>=3.0.0",
     # listed explicitly only so the CPU-only wheel source below applies (uv sources

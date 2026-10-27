@@ -1,6 +1,7 @@
 # Scholar Search API — Step 2: raw data on S3, smaller disk (`s2orc`)
 
-Status: proposal (2026-10-27). No code yet.
+Status: steps 1–4 done (2026-10-27): corpus on S3, read path in `api.py`, validated, benchmarked on
+the dev box. Results: [../S3_RAW_DATA_BENCHMARK.md](../S3_RAW_DATA_BENCHMARK.md). Step 5 (smaller instances) open.
 
 ## Context
 
@@ -67,18 +68,19 @@ Compute decides the total; S3 does not change it:
 
 ## Trade-offs
 
-- **Latency**: S3 GET ~10–30 ms, tails 100 ms+; a search waits for the slowest of 10. Expect
-  +30–100 ms, so ~100–200 ms median vs ~70 ms warm today. Sub-second is acceptable (stated).
+- **Latency**: measured cold S3 range GET ~100 ms (26 ms warm); a search waits for the slowest of 10.
+  Measured +140–200 ms median: p50 258 ms / p95 419 ms at 100 req/s vs 53 / 105 ms from local disk.
+  Sub-second is acceptable (stated).
 - **GET fees scale with traffic**; at our measured peak they exceed the server cost.
-- **Records are large** (~220 KB avg uncompressed), not 2 KB passages; each search downloads
-  ~10 compressed records.
+- **Records are mid-sized** (70 KB avg uncompressed, 18 KB zstd; measured), not 2 KB passages; each
+  search downloads ~10 compressed records (~180 KB).
 - Disk saving (~$215/month) is safe; compute saving is not, until measured.
 
 ## Corrections to the Gemini analysis
 
 - "Strip index to 12–30 GB": assumes stored raw/docvectors/positions; we store none.
 - "60 GB index on 32 GB, hot terms cached, 15–35 ms": guess; our 32 GB measurement says otherwise.
-- "2 KB passages": our records average ~220 KB; snippets need the full text.
+- "2 KB passages": our records average 70 KB; snippets need the full text.
 - t4g burstable: throttles under steady load; unsuitable.
 - "Use the 300 GB compressed dataset directly": gzip is not range-readable; repack required.
 

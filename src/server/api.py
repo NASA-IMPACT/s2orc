@@ -9,6 +9,8 @@ Usage (from the repo root):
 Paths (environment variables, defaults relative to the repo root):
     INDEX_DIR            Lucene index with "contents" and "title" fields   (default data/s2orc_index)
     ORIGINAL_DATA_PATH   decompressed S2ORC .jsonl files                   (default data/s2orc_papers)
+    RAW_S3_MAP_PATH      SQLite map from repack_raw_to_s3.py; when set, records are
+                         read from S3 instead of ORIGINAL_DATA_PATH         (default unset)
     DOI_MAP_PATH         SQLite DOI map built by build_doi_map.py           (default data/doi_map.sqlite)
 
 API Endpoints:
@@ -28,13 +30,16 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Literal, Optional, Dict, Any, Tuple
+import boto3
 import orjson
 import ujson as json
+import zstandard
+from botocore.config import Config
 from pyserini.search.lucene import LuceneSearcher
 from pathlib import Path
 
@@ -63,6 +68,13 @@ TITLE_WEIGHT = float(os.environ.get("SCHOLAR_TITLE_WEIGHT", "2.0"))
 # Threads per worker for request handling (see startup_event).
 THREADS = int(os.environ.get("SCHOLAR_THREADS", "40"))
 ORIGINAL_DATA_PATH = _path_from_env("data/s2orc_papers", "ORIGINAL_DATA_PATH")
+# When set, raw records come from S3: one zstd frame per record, located through
+# this SQLite map (built by repack_raw_to_s3.py, which also records bucket/prefix).
+RAW_S3_MAP_PATH = os.environ.get("RAW_S3_MAP_PATH") or None
+# Threads per worker that load result records. A local read takes ~15 ms of disk;
+# an S3 GET waits ~100 ms on the network (cold range), so S3 needs more threads
+# to keep 10 reads per search from queueing behind other requests' reads.
+DOC_THREADS = int(os.environ.get("SCHOLAR_DOC_THREADS") or (64 if RAW_S3_MAP_PATH else 16))
 
 """
 
@@ -168,8 +180,77 @@ async def startup_event():
         print(f"auth: {len(API_KEYS)} API key(s) loaded")
     else:
         print("auth: WARNING no API keys configured (SCHOLAR_API_KEYS / SCHOLAR_API_KEYS_FILE); API is open")
+    if RAW_S3_MAP_PATH:
+        _open_raw_s3()
+        print(f"raw records: s3://{_raw_s3['bucket']}/{_raw_s3['prefix']} ({len(_raw_s3['files'])} files, map {RAW_S3_MAP_PATH}, {DOC_THREADS} load threads)")
+    else:
+        print(f"raw records: {ORIGINAL_DATA_PATH}")
     if not Path(DOI_MAP_PATH).is_file():
         print(f"doi: WARNING {DOI_MAP_PATH} not found; /doi will return 503 until build_doi_map.py has run")
+
+
+# ---------------------------------------------------------------------------
+# Raw records on S3 (RAW_S3_MAP_PATH set)
+#
+# repack_raw_to_s3.py compressed every record as its own zstd frame, so a record
+# is one S3 range GET plus one decompress. The map turns the uncompressed
+# (filename, offset) of the doc IDs and the DOI map into (start, length) in
+# s3://bucket/prefix<filename>.zst.
+# ---------------------------------------------------------------------------
+
+_raw_s3: Dict[str, Any] = {}
+_raw_local = threading.local()
+
+
+def _open_raw_s3() -> None:
+    """Load bucket, prefix and file ids from the map; create the (thread-safe) S3 client."""
+    conn = sqlite3.connect(f"file:{RAW_S3_MAP_PATH}?mode=ro", uri=True)
+    meta = dict(conn.execute("SELECT key, value FROM meta"))
+    _raw_s3["files"] = dict((name, file_id) for file_id, name in conn.execute("SELECT id, name FROM file"))
+    conn.close()
+    _raw_s3["bucket"], _raw_s3["prefix"] = meta["bucket"], meta["prefix"]
+    # One pooled connection per document-loading thread.
+    _raw_s3["client"] = boto3.client("s3", config=Config(max_pool_connections=DOC_THREADS, retries={"mode": "standard"}))
+
+
+def _raw_thread_state():
+    """Per-thread map connection and zstd decompressor (neither is safe to share across threads)."""
+    state = getattr(_raw_local, "state", None)
+    if state is None:
+        conn = sqlite3.connect(f"file:{RAW_S3_MAP_PATH}?mode=ro", uri=True, check_same_thread=False)
+        state = _raw_local.state = (conn, zstandard.ZstdDecompressor())
+    return state
+
+
+def read_json_from_s3(filename: str, offset: int) -> Optional[Dict[str, Any]]:
+    """Fetch and parse one record from S3 by its uncompressed (filename, offset)."""
+    file_id = _raw_s3["files"].get(filename)
+    if file_id is None:
+        raise FileNotFoundError(f"Original data file not in the S3 map: {filename}")
+    conn, dctx = _raw_thread_state()
+    row = conn.execute("SELECT start, length FROM record WHERE file_id = ? AND offset = ?", (file_id, offset)).fetchone()
+    if row is None:
+        return None
+    start, length = row
+    body = _raw_s3["client"].get_object(
+        Bucket=_raw_s3["bucket"], Key=f"{_raw_s3['prefix']}{filename}.zst", Range=f"bytes={start}-{start + length - 1}"
+    )["Body"].read()
+    line = dctx.decompress(body).strip()
+    try:
+        return orjson.loads(line) if line else None
+    except orjson.JSONDecodeError as e:
+        print(f"Error decoding JSON at offset {offset} in {filename}: {e}")
+        return None
+
+
+def read_record(filename: str, offset: int) -> Optional[Dict[str, Any]]:
+    """One raw record by (filename, offset), from S3 or local disk depending on RAW_S3_MAP_PATH."""
+    if RAW_S3_MAP_PATH:
+        return read_json_from_s3(filename, offset)
+    file_path = Path(ORIGINAL_DATA_PATH) / filename
+    if not file_path.exists():
+        raise FileNotFoundError(f"Original data file not found: {file_path}")
+    return read_json_at_offset(str(file_path), offset)
 
 
 def read_json_at_offset(file_path: str, offset: int) -> Optional[Dict[str, Any]]:
@@ -359,15 +440,27 @@ def load_raw_document(doc_id: str) -> Tuple[Dict[str, Any], str]:
     """
     filename, offset, version = parse_doc_id(doc_id)
 
-    file_path = Path(ORIGINAL_DATA_PATH) / filename
-    if not file_path.exists():
-        raise FileNotFoundError(f"Original data file not found: {file_path}")
-
-    doc = read_json_at_offset(str(file_path), offset)
+    doc = read_record(filename, offset)
     if doc is None:
         raise ValueError(f"Could not read document at offset {offset} in {filename}")
 
     return doc, version
+
+
+def load_raw_document_timed(doc_id: str) -> Tuple[Dict[str, Any], str, float]:
+    """load_raw_document plus the time it took in ms (reported in the Server-Timing header)."""
+    t = time.perf_counter()
+    doc, version = load_raw_document(doc_id)
+    return doc, version, (time.perf_counter() - t) * 1000
+
+
+def server_timing(response: Response, search_ms: float, fetch_ms: List[float], total_ms: float) -> None:
+    """Server-Timing header: BM25 search, slowest record fetch (the parallel fetch's critical path), total."""
+    fetch = max(fetch_ms) if fetch_ms else 0.0
+    response.headers["Server-Timing"] = (
+        f"search;dur={search_ms:.1f}, fetch;dur={fetch:.1f};desc=\"slowest of {len(fetch_ms)} record reads\", "
+        f"total;dur={total_ms:.1f}"
+    )
 
 
 def retrieve_original_document(doc_id: str, requested_fields: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -433,8 +526,8 @@ def run_search(q: str, index: str, k: int):
     fields = INDEX_FIELDS[index]
     return searcher.search(q, k=k, fields=fields) if fields else searcher.search(q, k=k)
 
-# Records are read from disk in parallel; file reads release the GIL.
-_doc_pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="docload")
+# Records are read in parallel; file reads and S3 GETs release the GIL.
+_doc_pool = ThreadPoolExecutor(max_workers=DOC_THREADS, thread_name_prefix="docload")
 # PyStemmer instances are not thread-safe: one per thread.
 _thread_local = threading.local()
 
@@ -499,9 +592,9 @@ def build_link(doi: Optional[str], source: Any) -> Optional[str]:
     return None
 
 
-def _snippet_doc(hit, stems: set, context_words: int, max_matches: int, highlight: bool) -> SnippetDoc:
-    """Load one hit's record and build its snippet. Runs in _doc_pool."""
-    doc, version = load_raw_document(hit.docid)
+def _snippet_doc(hit, stems: set, context_words: int, max_matches: int, highlight: bool) -> Tuple[SnippetDoc, float]:
+    """Load one hit's record and build its snippet; also the record load time in ms. Runs in _doc_pool."""
+    doc, version, load_ms = load_raw_document_timed(hit.docid)
     fields = extract_document_fields(doc, version, ["title", "doi", "text"])
     text = fields.get("text") or ""
 
@@ -530,10 +623,10 @@ def _snippet_doc(hit, stems: set, context_words: int, max_matches: int, highligh
         matches=[SnippetMatch(content=p.content, score=p.score) for p in passages],
         match_count=match_count,
         score=float(hit.score),
-    )
+    ), load_ms
 
 
-def _snippet_search(req: SnippetSearchRequest) -> SnippetSearchResponse:
+def _snippet_search(req: SnippetSearchRequest, response: Optional[Response] = None) -> SnippetSearchResponse:
     if searcher is None:
         raise HTTPException(status_code=503, detail="Searcher not initialized")
     if not req.q.strip():
@@ -545,25 +638,33 @@ def _snippet_search(req: SnippetSearchRequest) -> SnippetSearchResponse:
     stems = snippets.query_stems(req.q, _stemmer())
 
     hits = run_search(req.q, req.index, k=req.offset + req.top_k)[req.offset:]
+    search_ms = (time.perf_counter() - t0) * 1000
 
     futures = [_doc_pool.submit(_snippet_doc, hit, stems, req.context_words, req.max_matches, req.highlight) for hit in hits]
     docs: List[SnippetDoc] = []
+    fetch_ms: List[float] = []
     for hit, future in zip(hits, futures):
         try:
-            docs.append(future.result())
+            doc, load_ms = future.result()
+            docs.append(doc)
+            fetch_ms.append(load_ms)
         except Exception as e:
             # Skip a hit whose record cannot be read; keep the rest of the page.
             print(f"Error building snippet for {hit.docid}: {e}")
 
+    total_ms = (time.perf_counter() - t0) * 1000
+    if response is not None:
+        server_timing(response, search_ms, fetch_ms, total_ms)
     return SnippetSearchResponse(
         searchParameters=req.model_dump(),
         docs=docs,
-        took_ms=int((time.perf_counter() - t0) * 1000),
+        took_ms=int(total_ms),
     )
 
 
 @app.get("/search", response_model=SnippetSearchResponse, dependencies=[Depends(require_api_key)])
 def snippet_search_get(
+    response: Response,
     q: str = Query(..., min_length=1, description="Search query"),
     top_k: int = Query(10, ge=1, le=MAX_TOP_K, description="Number of docs to return"),
     offset: int = Query(0, ge=0, le=MAX_OFFSET, description="Pagination offset"),
@@ -582,7 +683,7 @@ def snippet_search_get(
     return _snippet_search(SnippetSearchRequest(
         q=q, top_k=top_k, offset=offset, index=index,
         context_words=context_words, max_matches=max_matches, highlight=highlight,
-    ))
+    ), response)
 
 
 # ---------------------------------------------------------------------------
@@ -628,14 +729,14 @@ def _document_payload(doc: Dict[str, Any], version: str, fields: Optional[List[s
     return out
 
 
-def _fulltext_doc(hit, fields: Optional[List[str]]) -> Dict[str, Any]:
-    doc, version = load_raw_document(hit.docid)
+def _fulltext_doc(hit, fields: Optional[List[str]]) -> Tuple[Dict[str, Any], float]:
+    doc, version, load_ms = load_raw_document_timed(hit.docid)
     payload = {"score": float(hit.score)}
     payload.update(_document_payload(doc, version, fields))
-    return payload
+    return payload, load_ms
 
 
-def _fulltext_search(req: FulltextRequest) -> FulltextResponse:
+def _fulltext_search(req: FulltextRequest, response: Optional[Response] = None) -> FulltextResponse:
     if searcher is None:
         raise HTTPException(status_code=503, detail="Searcher not initialized")
     if not req.q.strip():
@@ -645,24 +746,32 @@ def _fulltext_search(req: FulltextRequest) -> FulltextResponse:
 
     t0 = time.perf_counter()
     hits = run_search(req.q, req.index, k=req.offset + req.top_k)[req.offset:]
+    search_ms = (time.perf_counter() - t0) * 1000
 
     futures = [_doc_pool.submit(_fulltext_doc, hit, req.fields) for hit in hits]
     docs: List[Dict[str, Any]] = []
+    fetch_ms: List[float] = []
     for hit, future in zip(hits, futures):
         try:
-            docs.append(future.result())
+            doc, load_ms = future.result()
+            docs.append(doc)
+            fetch_ms.append(load_ms)
         except Exception as e:
             print(f"Error loading document {hit.docid}: {e}")
 
+    total_ms = (time.perf_counter() - t0) * 1000
+    if response is not None:
+        server_timing(response, search_ms, fetch_ms, total_ms)
     return FulltextResponse(
         searchParameters=req.model_dump(),
         docs=docs,
-        took_ms=int((time.perf_counter() - t0) * 1000),
+        took_ms=int(total_ms),
     )
 
 
 @app.get("/fulltext", response_model=FulltextResponse, dependencies=[Depends(require_api_key)])
 def fulltext_search_get(
+    response: Response,
     q: str = Query(..., min_length=1, description="Search query"),
     top_k: int = Query(10, ge=1, le=MAX_TOP_K, description="Number of docs to return"),
     offset: int = Query(0, ge=0, le=MAX_OFFSET, description="Pagination offset"),
@@ -679,7 +788,7 @@ def fulltext_search_get(
         bad = [f for f in field_list if f not in DOC_FIELDS]
         if bad:
             raise HTTPException(status_code=422, detail=f"Unknown fields {bad}; valid: {list(DOC_FIELDS)}")
-    return _fulltext_search(FulltextRequest(q=q, top_k=top_k, offset=offset, index=index, fields=field_list))
+    return _fulltext_search(FulltextRequest(q=q, top_k=top_k, offset=offset, index=index, fields=field_list), response)
 
 
 # ---------------------------------------------------------------------------
@@ -714,7 +823,7 @@ def _lookup_doi(doi: str) -> Dict[str, Any]:
     if row is None:
         raise HTTPException(status_code=404, detail=f"No paper with DOI {key}")
     filename, offset = row
-    doc = read_json_at_offset(str(Path(ORIGINAL_DATA_PATH) / filename), offset)
+    doc = read_record(filename, offset)
     if doc is None:
         raise HTTPException(status_code=500, detail="Record for this DOI could not be read")
     payload = _document_payload(doc, get_version(doc), None)
@@ -732,14 +841,23 @@ def doi_lookup_path(doi: str):
 async def health():
     """Detailed health check endpoint."""
     index_exists = Path(FULL_TEXT_INDEX_DIR).exists()
-    data_exists = Path(ORIGINAL_DATA_PATH).exists()
+    if RAW_S3_MAP_PATH:
+        try:
+            _raw_s3["client"].head_bucket(Bucket=_raw_s3["bucket"])
+            data_exists = True
+        except Exception:
+            data_exists = False
+        data_path = f"s3://{_raw_s3.get('bucket')}/{_raw_s3.get('prefix')}"
+    else:
+        data_exists = Path(ORIGINAL_DATA_PATH).exists()
+        data_path = ORIGINAL_DATA_PATH
 
     return {
         "status": "healthy" if (searcher and index_exists and data_exists) else "unhealthy",
         "index_exists": index_exists,
         "index_path": FULL_TEXT_INDEX_DIR,
         "data_exists": data_exists,
-        "data_path": ORIGINAL_DATA_PATH,
+        "data_path": data_path,
         "searcher_initialized": searcher is not None,
         "num_docs": searcher.num_docs if searcher else 0,
         "doi_map_exists": Path(DOI_MAP_PATH).is_file(),

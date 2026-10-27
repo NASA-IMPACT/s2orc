@@ -13,6 +13,9 @@
 #                                         (default: data/s2orc_index; FULL_TEXT_INDEX_DIR also accepted)
 #   ORIGINAL_DATA_PATH
 #                     Decompressed S2ORC .jsonl files (default: data/s2orc_papers)
+#   RAW_S3_MAP_PATH   SQLite map from src/server/repack_raw_to_s3.py; when set,
+#                     records are read from S3 and ORIGINAL_DATA_PATH is unused
+#                     (AWS credentials from the usual boto3 sources)
 #   DOI_MAP_PATH      SQLite DOI map from build_doi_map.py (default: data/doi_map.sqlite)
 #   HOST              Bind address        (default: 0.0.0.0)
 #   PORT              Port                (default: 8000)
@@ -107,10 +110,19 @@ INDEX_DIR="${INDEX_DIR:-${FULL_TEXT_INDEX_DIR:-$REPO_ROOT/data/s2orc_index}}"
 ORIGINAL_DATA_PATH="${ORIGINAL_DATA_PATH:-$REPO_ROOT/data/s2orc_papers}"
 DOI_MAP_PATH="${DOI_MAP_PATH:-$REPO_ROOT/data/doi_map.sqlite}"
 [ -d "$INDEX_DIR" ] || fail "INDEX_DIR not found: $INDEX_DIR (build the index or set INDEX_DIR)"
-[ -d "$ORIGINAL_DATA_PATH" ] || fail "ORIGINAL_DATA_PATH not found: $ORIGINAL_DATA_PATH (set ORIGINAL_DATA_PATH)"
+if [ -n "${RAW_S3_MAP_PATH:-}" ]; then
+    [ -f "$RAW_S3_MAP_PATH" ] || fail "RAW_S3_MAP_PATH not found: $RAW_S3_MAP_PATH (run src/server/repack_raw_to_s3.py)"
+else
+    [ -d "$ORIGINAL_DATA_PATH" ] || fail "ORIGINAL_DATA_PATH not found: $ORIGINAL_DATA_PATH (set ORIGINAL_DATA_PATH)"
+fi
 printf '%-20s %s\n' "Python" "$PY_DESC"
 printf '%-20s %s\n' "INDEX_DIR" "$INDEX_DIR"
-printf '%-20s %s\n' "ORIGINAL_DATA_PATH" "$ORIGINAL_DATA_PATH"
+if [ -n "${RAW_S3_MAP_PATH:-}" ]; then
+    printf '%-20s %s\n' "RAW_S3_MAP_PATH" "$RAW_S3_MAP_PATH  (records from S3)"
+    export RAW_S3_MAP_PATH
+else
+    printf '%-20s %s\n' "ORIGINAL_DATA_PATH" "$ORIGINAL_DATA_PATH"
+fi
 printf '%-20s %s\n' "DOI_MAP_PATH" "$DOI_MAP_PATH"
 
 if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then

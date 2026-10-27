@@ -9,6 +9,18 @@ put things elsewhere.
 Plan for about **4 TB of disk** if you keep the intermediate files, or **2 TB** if you delete the
 converted collections after the index is built (see step 5).
 
+**Shortcut: serve from prebuilt files on S3.** If the index and maps were already built and put
+on S3, steps 2–6 are a download of ~62 GB instead, and the raw corpus stays on S3 (records are read
+per search with S3 range GETs; ~+150 ms per search, see `docs/S3_RAW_DATA_BENCHMARK.md`):
+
+```bash
+S2ORC_S3_URI=s3://<bucket>/s2orc_index_v2 src/server/download_from_s3.sh
+# -> data/s2orc_index, data/doi_map.sqlite, data/raw_s3_map.sqlite; prints the .env lines
+RAW_S3_MAP_PATH=data/raw_s3_map.sqlite ./start.sh      # after API keys (step 7)
+```
+
+It needs the AWS CLI and credentials (instance role or `aws configure`) that can read the bucket.
+
 Steps 3, 4 and 6 are also wrapped in one script, `src/pyserini/build_index.sh`, which runs
 convert → merge → index → DOI map with the paths from `.env`; the individual commands are shown
 here so that each step can be understood and re-run on its own.
