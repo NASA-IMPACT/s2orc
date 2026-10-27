@@ -87,7 +87,7 @@ original record again. The merge is resumable; files already present in its outp
 python src/pyserini/build_pyserini_index.py \
   --input-path data/s2orc_pyserini_text_title \
   --index-path data/s2orc_index \
-  --fields title --no-positions --threads 20
+  --fields title --threads 20
 ```
 
 Result: `data/s2orc_index`, **~60 GB**, 27.7M documents with two Lucene fields, `contents`
@@ -97,9 +97,9 @@ Why these flags:
 
 - `--fields title` indexes the `title` key as its own field, so the API can search title and body
   together with a title boost (`index=all`), or either alone.
-- `--no-positions` leaves out term positions. The API does not use phrase queries, and the index
+- Term positions are left out by default. The API does not use phrase queries, and the index
   shrinks from ~247 GB to ~60 GB, small enough to sit entirely in the page cache so warm queries
-  take tens of milliseconds. Drop the flag if you want phrase queries from the command-line tool.
+  take tens of milliseconds. Add `--positions` if you want phrase queries from the command-line tool.
 
 Check it:
 

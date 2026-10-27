@@ -22,8 +22,8 @@ Index sizes by build option:
 
 | Build | Size | Use |
 |---|---|---|
-| two-field (`--fields title --no-positions`) | 60 GB | what the API serves; no phrase queries |
-| full text with positions (default flags) | 247 GB | phrase queries from the command-line tool |
+| two-field (`--fields title`) | 60 GB | what the API serves; no phrase queries |
+| full text with positions (`--positions`) | 247 GB | phrase queries from the command-line tool |
 | titles only | 3.5 GB | title search without the API |
 
 ### Prerequisites
@@ -112,15 +112,14 @@ python src/pyserini/build_pyserini_index.py \
 ```
 
 For the merged two-field collection (Option C), index the `title` key as its own field. Positions
-can be dropped too: the API does not use phrase queries and the index shrinks from ~250 GB to ~60 GB
-for the full corpus, small enough to sit in the page cache:
+are left out by default: the API does not use phrase queries and the index shrinks from ~250 GB to
+~60 GB for the full corpus, small enough to sit in the page cache:
 
 ```bash
 python src/pyserini/build_pyserini_index.py \
   --input-path s2orc_pyserini_text_title \
   --index-path s2orc_index \
   --fields title \
-  --no-positions \
   --threads 20
 ```
 
@@ -129,11 +128,11 @@ python src/pyserini/build_pyserini_index.py \
 - `--index-path` (required): Output path for Pyserini index
 - `--threads` (optional): Number of indexing threads (default: 20)
 - `--fields` (optional): Extra JSON keys to index as separate Lucene fields besides `contents` (use `--fields title` for the merged collection)
-- `--no-positions` (optional): Do not store term positions (smaller index; phrase queries unsupported)
+- `--positions` (optional): Store term positions (needed for phrase queries; index grows ~4x)
 
 **What this does:**
 - Creates a Lucene index optimized for BM25 search
-- Stores term positions for phrase queries (unless `--no-positions`)
+- Does NOT store term positions unless `--positions` is given (no phrase queries)
 - Does NOT store raw documents to save space
 
 ### Step 3: Search the Index
@@ -212,7 +211,7 @@ python src/pyserini/convert_data_merge.py \
 python src/pyserini/build_pyserini_index.py \
   --input-path s2orc_pyserini_text_title \
   --index-path s2orc_index \
-  --fields title --no-positions
+  --fields title
 
 # Step 3: Search
 python src/pyserini/search_pyserini.py \
