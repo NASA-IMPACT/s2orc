@@ -27,11 +27,11 @@
 #                     (default: <repo>/.venv/bin/python)
 #
 # Usage:
-#   src/server/start.sh
-#   PORT=8001 WORKERS=2 src/server/start.sh
-#   SCHOLAR_API_KEYS=team-key-1,team-key-2 src/server/start.sh
-#   INDEX_DIR=/mnt/idx ORIGINAL_DATA_PATH=/mnt/s2orc src/server/start.sh
-#   src/server/start.sh --reload      # dev: restart workers when a loaded .py changes
+#   ./start.sh
+#   PORT=8001 WORKERS=2 ./start.sh
+#   SCHOLAR_API_KEYS=team-key-1,team-key-2 ./start.sh
+#   INDEX_DIR=/mnt/idx ORIGINAL_DATA_PATH=/mnt/s2orc ./start.sh
+#   ./start.sh --reload      # dev: restart workers when a loaded .py changes
 #                                     # (extra arguments are passed to gunicorn)
 #
 # Workers: each one starts its own JVM and opens its own Lucene searcher
@@ -45,7 +45,7 @@
 #
 # Managing the running server (all from the repo root):
 #   Start detached, logging to server.log:
-#       nohup src/server/start.sh > server.log 2>&1 &
+#       nohup ./start.sh > server.log 2>&1 &
 #       tail -f server.log                   # watch startup; Ctrl-C stops only the tail
 #   Is it up?
 #       curl -s localhost:8000/health
@@ -67,8 +67,8 @@
 
 set -euo pipefail
 
-APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$APP_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="$REPO_ROOT/src/server"
 cd "$REPO_ROOT"
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
@@ -114,7 +114,7 @@ printf '%-20s %s\n' "ORIGINAL_DATA_PATH" "$ORIGINAL_DATA_PATH"
 printf '%-20s %s\n' "DOI_MAP_PATH" "$DOI_MAP_PATH"
 
 if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
-    fail "Port $PORT is already in use. Pick another with PORT=<port> src/server/start.sh"
+    fail "Port $PORT is already in use. Pick another with PORT=<port> ./start.sh"
 fi
 
 WORKERS="${WORKERS:-16}"

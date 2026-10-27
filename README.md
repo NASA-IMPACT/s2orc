@@ -18,7 +18,7 @@ gunicorn with bearer-token authentication.
 |---|---|
 | [`src/s2orc/`](src/s2orc/README.md) | download, verify and decompress the S2ORC dataset |
 | [`src/pyserini/`](src/pyserini/README.md) | convert the data to Pyserini documents, build and query the Lucene index; `build_index.sh` runs the whole pipeline |
-| [`src/server/`](src/server/README.md) | the Scholar Search API: FastAPI app, snippet extraction, DOI map builder, `start.sh` launcher, tests |
+| [`src/server/`](src/server/README.md) | the Scholar Search API: FastAPI app, snippet extraction, DOI map builder, tests (launcher: `./start.sh` at the repo root) |
 | `pyproject.toml`, `uv.lock` | Python dependencies, managed with [uv](https://docs.astral.sh/uv/) (`src/requirements.txt` is exported from them for plain pip) |
 | `Dockerfile`, `docker-compose.yml` | one image with Java 21 + uv; an `index` service for building and an `api` service for serving |
 | `.env.example` | every setting: where the index, data and DOI map live, port, workers, API keys |
@@ -183,7 +183,7 @@ Three artifacts are needed, and nothing else from the build:
 mkdir -p ~/.scholar && echo "$(openssl rand -hex 24)   # me" >> ~/.scholar/api_keys && chmod 600 ~/.scholar/api_keys
 
 # Option A: on the machine. start.sh syncs the uv environment, checks Java, paths and port, runs gunicorn.
-src/server/start.sh                       # or: nohup src/server/start.sh > server.log 2>&1 &
+./start.sh                       # or: nohup ./start.sh > server.log 2>&1 &
 
 # Option B: Docker
 docker compose up -d api
