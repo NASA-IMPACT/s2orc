@@ -9,6 +9,7 @@ written in, not this repository.
 |---|---|
 | [00_scholar_api_full_plan.md](00_scholar_api_full_plan.md) | overall design: snippet search, full-document search, DOI lookup, bearer auth, gunicorn; status at the end |
 | [01_snippet_search_endpoint.md](01_snippet_search_endpoint.md) | the snippet endpoint in detail: stem matching, passage selection, word-based context, performance work |
+| [02_raw_data_on_s3.md](02_raw_data_on_s3.md) | proposal: raw records on S3 (per-record zstd, byte-range reads), ~100 GB disk, cost and latency trade-offs |
 
 Where the notes say… | …look here
 ---|---
