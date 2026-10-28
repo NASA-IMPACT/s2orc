@@ -6,7 +6,7 @@
 #   doi_map.sqlite       DOI map for /doi                -> DOI_MAP_PATH     (default data/doi_map.sqlite)
 #   raw_s3_map.sqlite    record -> S3 byte range map     -> RAW_S3_MAP_PATH  (default data/raw_s3_map.sqlite)
 #
-# With RAW_S3_MAP_PATH set, the API reads each result's raw record from S3
+# With RAW_SOURCE=s3 (the default), the API reads each result's raw record from S3
 # (src/server/repack_raw_to_s3.py, docs/S3_RAW_DATA_BENCHMARK.md), so the
 # 1.9 TB corpus is not needed on disk. About 62 GB in total. Reruns only fetch
 # what is missing or changed (aws s3 sync).
@@ -49,4 +49,5 @@ echo
 echo "Done. For .env (or the environment):"
 echo "INDEX_DIR=$INDEX_DIR"
 echo "DOI_MAP_PATH=$DOI_MAP_PATH"
+echo "RAW_SOURCE=s3"
 echo "RAW_S3_MAP_PATH=$RAW_S3_MAP_PATH"

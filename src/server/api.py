@@ -8,9 +8,9 @@ Usage (from the repo root):
 
 Paths (environment variables, defaults relative to the repo root):
     INDEX_DIR            Lucene index with "contents" and "title" fields   (default data/s2orc_index)
-    ORIGINAL_DATA_PATH   decompressed S2ORC .jsonl files                   (default data/s2orc_papers)
-    RAW_S3_MAP_PATH      SQLite map from repack_raw_to_s3.py; when set, records are
-                         read from S3 instead of ORIGINAL_DATA_PATH         (default unset)
+    RAW_SOURCE           where raw records are read: "s3" or "disk"        (default s3)
+    RAW_S3_MAP_PATH      s3: record -> S3 byte-range map (repack_raw_to_s3.py) (default data/raw_s3_map.sqlite)
+    ORIGINAL_DATA_PATH   disk: decompressed S2ORC .jsonl files              (default data/s2orc_papers)
     DOI_MAP_PATH         SQLite DOI map built by build_doi_map.py           (default data/doi_map.sqlite)
 
 API Endpoints:
@@ -68,13 +68,17 @@ TITLE_WEIGHT = float(os.environ.get("SCHOLAR_TITLE_WEIGHT", "2.0"))
 # Threads per worker for request handling (see startup_event).
 THREADS = int(os.environ.get("SCHOLAR_THREADS", "40"))
 ORIGINAL_DATA_PATH = _path_from_env("data/s2orc_papers", "ORIGINAL_DATA_PATH")
-# When set, raw records come from S3: one zstd frame per record, located through
-# this SQLite map (built by repack_raw_to_s3.py, which also records bucket/prefix).
-RAW_S3_MAP_PATH = os.environ.get("RAW_S3_MAP_PATH") or None
+# Where result records are read from. "s3": one zstd frame per record, located
+# through RAW_S3_MAP_PATH (built by repack_raw_to_s3.py, which also records the
+# bucket and prefix). "disk": by byte offset from the .jsonl files in ORIGINAL_DATA_PATH.
+RAW_SOURCE = (os.environ.get("RAW_SOURCE") or "s3").strip().lower()
+if RAW_SOURCE not in ("s3", "disk"):
+    raise RuntimeError(f"RAW_SOURCE must be 's3' or 'disk', not {RAW_SOURCE!r}")
+RAW_S3_MAP_PATH = _path_from_env("data/raw_s3_map.sqlite", "RAW_S3_MAP_PATH")
 # Threads per worker that load result records. A local read takes ~15 ms of disk;
 # an S3 GET waits ~100 ms on the network (cold range), so S3 needs more threads
 # to keep 10 reads per search from queueing behind other requests' reads.
-DOC_THREADS = int(os.environ.get("SCHOLAR_DOC_THREADS") or (64 if RAW_S3_MAP_PATH else 16))
+DOC_THREADS = int(os.environ.get("SCHOLAR_DOC_THREADS") or (64 if RAW_SOURCE == "s3" else 16))
 
 """
 
@@ -180,7 +184,10 @@ async def startup_event():
         print(f"auth: {len(API_KEYS)} API key(s) loaded")
     else:
         print("auth: WARNING no API keys configured (SCHOLAR_API_KEYS / SCHOLAR_API_KEYS_FILE); API is open")
-    if RAW_S3_MAP_PATH:
+    if RAW_SOURCE == "s3":
+        if not Path(RAW_S3_MAP_PATH).is_file():
+            raise RuntimeError(f"RAW_SOURCE=s3 but no map at {RAW_S3_MAP_PATH}: run src/server/download_from_s3.sh "
+                               "(or repack_raw_to_s3.py), set RAW_S3_MAP_PATH, or set RAW_SOURCE=disk")
         _open_raw_s3()
         print(f"raw records: s3://{_raw_s3['bucket']}/{_raw_s3['prefix']} ({len(_raw_s3['files'])} files, map {RAW_S3_MAP_PATH}, {DOC_THREADS} load threads)")
     else:
@@ -190,7 +197,7 @@ async def startup_event():
 
 
 # ---------------------------------------------------------------------------
-# Raw records on S3 (RAW_S3_MAP_PATH set)
+# Raw records on S3 (RAW_SOURCE=s3)
 #
 # repack_raw_to_s3.py compressed every record as its own zstd frame, so a record
 # is one S3 range GET plus one decompress. The map turns the uncompressed
@@ -244,8 +251,8 @@ def read_json_from_s3(filename: str, offset: int) -> Optional[Dict[str, Any]]:
 
 
 def read_record(filename: str, offset: int) -> Optional[Dict[str, Any]]:
-    """One raw record by (filename, offset), from S3 or local disk depending on RAW_S3_MAP_PATH."""
-    if RAW_S3_MAP_PATH:
+    """One raw record by (filename, offset), from S3 or local disk depending on RAW_SOURCE."""
+    if RAW_SOURCE == "s3":
         return read_json_from_s3(filename, offset)
     file_path = Path(ORIGINAL_DATA_PATH) / filename
     if not file_path.exists():
@@ -841,7 +848,7 @@ def doi_lookup_path(doi: str):
 async def health():
     """Detailed health check endpoint."""
     index_exists = Path(FULL_TEXT_INDEX_DIR).exists()
-    if RAW_S3_MAP_PATH:
+    if RAW_SOURCE == "s3":
         try:
             _raw_s3["client"].head_bucket(Bucket=_raw_s3["bucket"])
             data_exists = True
@@ -857,6 +864,7 @@ async def health():
         "index_exists": index_exists,
         "index_path": FULL_TEXT_INDEX_DIR,
         "data_exists": data_exists,
+        "raw_source": RAW_SOURCE,
         "data_path": data_path,
         "searcher_initialized": searcher is not None,
         "num_docs": searcher.num_docs if searcher else 0,

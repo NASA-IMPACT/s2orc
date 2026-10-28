@@ -16,7 +16,7 @@ per search with S3 range GETs; ~+150 ms per search, see `docs/S3_RAW_DATA_BENCHM
 ```bash
 S2ORC_S3_URI=s3://<bucket>/s2orc_index_v2 src/server/download_from_s3.sh
 # -> data/s2orc_index, data/doi_map.sqlite, data/raw_s3_map.sqlite; prints the .env lines
-RAW_S3_MAP_PATH=data/raw_s3_map.sqlite ./start.sh      # after API keys (step 7)
+./start.sh                       # RAW_SOURCE=s3 is the default; after API keys (step 7)
 ```
 
 It needs the AWS CLI and credentials (instance role or `aws configure`) that can read the bucket.

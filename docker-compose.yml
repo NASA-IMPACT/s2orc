@@ -21,8 +21,11 @@ services:
     env_file:
       - .env
     environment:
-      # Container-side locations of the three artifacts mounted below.
+      # Container-side locations of the artifacts mounted below. RAW_SOURCE (s3 or
+      # disk) comes from .env, default s3; s3 needs AWS credentials in .env or an
+      # instance role (IMDSv2 hop limit >= 2 for containers).
       INDEX_DIR: /data/index
+      RAW_S3_MAP_PATH: /data/raw_s3_map.sqlite
       ORIGINAL_DATA_PATH: /data/s2orc_papers
       DOI_MAP_PATH: /data/doi_map.sqlite
       HOST: 0.0.0.0
@@ -31,6 +34,7 @@ services:
       SCHOLAR_API_KEYS_FILE: ${SCHOLAR_API_KEYS_FILE:+/run/secrets/api_keys}
     volumes:
       - ${INDEX_DIR:-./data/s2orc_index}:/data/index:ro
+      - ${RAW_S3_MAP_PATH:-./data/raw_s3_map.sqlite}:/data/raw_s3_map.sqlite:ro
       - ${ORIGINAL_DATA_PATH:-./data/s2orc_papers}:/data/s2orc_papers:ro
       - ${DOI_MAP_PATH:-./data/doi_map.sqlite}:/data/doi_map.sqlite:ro
       - ${SCHOLAR_API_KEYS_FILE:-/dev/null}:/run/secrets/api_keys:ro

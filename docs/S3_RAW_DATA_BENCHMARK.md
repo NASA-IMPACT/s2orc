@@ -73,7 +73,8 @@ Decompression is 400–650 MB/s in every case (<0.2 ms per record).
 The 10 reads run in parallel on the worker's record-loading pool (`api.py read_json_from_s3`,
 `_doc_pool`). The boto3 client is shared; each thread has its own SQLite connection and zstd
 decompressor (a shared decompressor corrupts output under threads). `/doi` uses the same path.
-Enabled by `RAW_S3_MAP_PATH`; without it the server reads the local corpus as before.
+Chosen by `RAW_SOURCE`: `s3` (default) reads this way through `RAW_S3_MAP_PATH`; `disk` reads the
+local corpus (`ORIGINAL_DATA_PATH`) by byte offset as before.
 
 ## Validation (`src/server/tests/validate_raw_s3.py`)
 
@@ -136,12 +137,63 @@ read at 25–35 ms; the repacked objects, written 30–60 min earlier, at ~100 m
 random papers out of 505 GB, so most reads are cold: **plan on ~100 ms per GET, not the 10–30 ms
 often quoted** (and measured in the first small test, which was warm). Repeat queries are faster.
 
+### 32 GB machines (4 and 8 vCPU), records from S3
+
+Emulated on the same box, as in the earlier sizing benchmarks: the server ran as a systemd unit in a
+slice with `MemoryMax=30G` (counts page cache; a 32 GB machine minus the OS) and no swap, pinned
+to n/2 physical cores with both hyperthreads (`AllowedCPUs=0-1,16-17` for 4 vCPU, `0-3,16-19` for
+8 vCPU), one worker per two vCPUs, `RAW_SOURCE=s3`. Every other process that maps the index was
+stopped and the page cache dropped first (0 GB of index resident at start). Load generator on the
+other cores. 60 s warm-up, then 60 s per phase, new query seed per phase; the rate ramp stops at
+the first rate it cannot sustain.
+
+**4 vCPU · 32 GB (r6i.xlarge shape), 2 workers**
+
+| Load | Throughput | p50 | p95 | p99 | search p50 | fetch p50 |
+|---|---|---|---|---|---|---|
+| 1 client | 4.6 req/s | 213 ms | 307 ms | 347 ms | 54 ms | 148 ms |
+| 10 clients | 38.9 req/s | 242 ms | 366 ms | 494 ms | 43 ms | 168 ms |
+| 25 clients | 46.5 req/s | 513 ms | 807 ms | 1.06 s | 54 ms | 269 ms |
+| 50 clients | 46.3 req/s | 1.04 s | 1.59 s | 1.97 s | 54 ms | 321 ms |
+| 100 clients | 45.8 req/s | 2.15 s | 3.76 s | 4.00 s | 53 ms | 300 ms |
+| 10 req/s | 10.0 req/s | 179 ms | 249 ms | 324 ms | 18 ms | 152 ms |
+| 25 req/s | 24.9 req/s | 195 ms | 279 ms | 384 ms | 20 ms | 163 ms |
+| 50 req/s | 46.7 req/s (not sustained) | 2.48 s | 4.20 s | 4.65 s | 50 ms | 342 ms |
+
+**8 vCPU · 32 GB (m6i.2xlarge shape), 4 workers**
+
+| Load | Throughput | p50 | p95 | p99 | search p50 | fetch p50 |
+|---|---|---|---|---|---|---|
+| 1 client | 4.7 req/s | 212 ms | 285 ms | 361 ms | 51 ms | 149 ms |
+| 10 clients | 41.6 req/s | 227 ms | 348 ms | 477 ms | 38 ms | 166 ms |
+| 25 clients | 82.7 req/s | 292 ms | 443 ms | 582 ms | 38 ms | 198 ms |
+| 50 clients | 88.5 req/s | 538 ms | 812 ms | 1.17 s | 51 ms | 287 ms |
+| 100 clients | 88.5 req/s | 1.09 s | 1.52 s | 1.83 s | 60 ms | 358 ms |
+| 10 req/s | 10.0 req/s | 192 ms | 275 ms | 343 ms | 28 ms | 153 ms |
+| 25 req/s | 24.9 req/s | 202 ms | 294 ms | 380 ms | 30 ms | 158 ms |
+| 50 req/s | 49.8 req/s | 250 ms | 386 ms | 505 ms | 38 ms | 179 ms |
+| 100 req/s | 80.8 req/s (not sustained) | 1.34 s | 24.9 s | 27.3 s | 67 ms | 329 ms |
+
+Zero errors and no OOM kills in either run. Memory sat at the 30 GB cap (`memory.events max`
+257,745 / 706,602 times): 2.9 / 5.4 GB process memory, the rest page cache for the index.
+
+Read as capacity: **4 vCPU tops out at ~46 searches/s, 8 vCPU at ~88/s.** Below that, latency is
+flat at p50 ~180–250 ms, p95 ~250–390 ms; past it, requests queue and latency grows with the load.
+At saturation both the BM25 time and the fetch time rise (CPU contention: Lucene plus the Python
+side of the S3 reads), so CPU, not RAM, sets the ceiling once records are off the disk.
+
+Compared with the earlier sizing run of the same 4 vCPU · 32 GB shape with records on local disk
+(p50 0.56 s / 17 req/s at 10 clients, 3.41 s / 28 req/s at 100 clients), the S3 version is faster:
+the 1.9 TB of records no longer competes with the index for the page cache. **Caveat:** the volume
+was at 1,000 MB/s for this run (125 MB/s in the sizing run), which also speeds up index pages that
+miss the cache; rerun at the baseline volume before relying on the size of this gap.
+
 ### Things that mattered
 
 - **Record-loading threads.** With the local-disk pool size (16 threads per worker) the S3 server
   managed only 14 req/s (p50 718 ms) at 10 clients, and fell behind at 50 and 100 req/s (queues of
   tens of seconds): 10 reads × ~150 ms per search queued behind each other. With 64 threads per
-  worker (`SCHOLAR_DOC_THREADS`, now the default when `RAW_S3_MAP_PATH` is set) it sustains 100 req/s.
+  worker (`SCHOLAR_DOC_THREADS`, now the default with `RAW_SOURCE=s3`) it sustains 100 req/s.
 - Multipart vs single-part objects and object size do not change GET latency; only cold vs warm does.
 
 ### Caveats
@@ -162,8 +214,8 @@ python src/server/repack_raw_to_s3.py --workers 28                  # once; writ
 aws s3 cp data/raw_s3_map.sqlite s3://<bucket>/s2orc_index_v2/raw_s3_map.sqlite
 python src/server/tests/validate_raw_s3.py coverage
 python src/server/tests/validate_raw_s3.py bytes --n 2000
-PORT=8001 ./start.sh &                                  # RAW_S3_MAP_PATH set: S3
-PORT=8002 RAW_S3_MAP_PATH= ./start.sh &                 # local corpus
+PORT=8001 RAW_SOURCE=s3 ./start.sh &                    # records from S3 (default)
+PORT=8002 RAW_SOURCE=disk ./start.sh &                  # records from the local corpus
 python src/server/tests/s3_benchmark.py terms --url http://127.0.0.1:8002 --n 5000 --out terms.txt
 python src/server/tests/validate_raw_s3.py servers --n 500 --terms-file terms.txt
 python src/server/tests/s3_benchmark.py direct --seed 77
@@ -174,7 +226,7 @@ python src/server/tests/s3_benchmark.py rate --url http://127.0.0.1:8001 --rate 
 
 A new server needs only the index and the two maps, not the corpus:
 `S2ORC_S3_URI=s3://<bucket>/s2orc_index_v2 src/server/download_from_s3.sh` (~62 GB), then
-`RAW_S3_MAP_PATH=data/raw_s3_map.sqlite ./start.sh`.
+`./start.sh` (`RAW_SOURCE=s3` is the default).
 
 Use new `--seed` values for every rerun: a seed already used leaves its records warm in S3 (and in
 the page cache for the local server).

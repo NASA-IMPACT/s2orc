@@ -51,6 +51,8 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     # host directories from .env at these paths.
     DATA_DIR=/data \
     INDEX_DIR=/data/index \
+    RAW_SOURCE=s3 \
+    RAW_S3_MAP_PATH=/data/raw_s3_map.sqlite \
     ORIGINAL_DATA_PATH=/data/s2orc_papers \
     DOI_MAP_PATH=/data/doi_map.sqlite \
     HOST=0.0.0.0 \

@@ -51,9 +51,10 @@ so the server works from any working directory:
 | Variable | Default | Description |
 |---|---|---|
 | `INDEX_DIR` | `data/s2orc_index` | Lucene index with `contents` and `title` fields (`FULL_TEXT_INDEX_DIR` is accepted as an older name) |
-| `ORIGINAL_DATA_PATH` | `data/s2orc_papers` | decompressed S2ORC `.jsonl` files; records are read back by byte offset |
+| `RAW_SOURCE` | `s3` | where result records are read: `s3` (range GET per record via `RAW_S3_MAP_PATH`) or `disk` (byte offset into `ORIGINAL_DATA_PATH`); see `docs/S3_RAW_DATA_BENCHMARK.md` |
+| `RAW_S3_MAP_PATH` | `data/raw_s3_map.sqlite` | `s3`: record → S3 byte-range map (`download_from_s3.sh` or `repack_raw_to_s3.py`) |
+| `ORIGINAL_DATA_PATH` | `data/s2orc_papers` | `disk`: decompressed S2ORC `.jsonl` files; records are read back by byte offset |
 | `DOI_MAP_PATH` | `data/doi_map.sqlite` | DOI map built by `build_doi_map.py` |
-| `RAW_S3_MAP_PATH` | none | record → S3 byte-range map from `repack_raw_to_s3.py`; when set, records are read from S3 and `ORIGINAL_DATA_PATH` is unused (see `docs/S3_RAW_DATA_BENCHMARK.md`) |
 | `SCHOLAR_DOC_THREADS` | `64` with S3, else `16` | record-loading threads per worker |
 | `SCHOLAR_API_KEYS`, `SCHOLAR_API_KEYS_FILE` | none | bearer tokens, see Authentication |
 | `SCHOLAR_TITLE_WEIGHT` | `2.0` | title boost for `index=all` |

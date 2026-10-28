@@ -1,4 +1,4 @@
-"""The S3 read path (RAW_S3_MAP_PATH) returns the same records as the local-file path.
+"""The S3 read path (RAW_SOURCE=s3) returns the same records as the local-file path.
 
 No network: the S3 client is replaced by one that serves byte ranges from the packed file.
 """
@@ -44,6 +44,7 @@ def raw(tmp_path, monkeypatch):
     map_path = tmp_path / "raw_s3_map.sqlite"
     build_map(work, map_path, "bucket", "raw/", 3)
 
+    monkeypatch.setattr(api, "RAW_SOURCE", "s3")
     monkeypatch.setattr(api, "RAW_S3_MAP_PATH", str(map_path))
     monkeypatch.setattr(api, "ORIGINAL_DATA_PATH", str(data))
     monkeypatch.setattr(api, "_raw_local", api.threading.local())

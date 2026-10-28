@@ -11,11 +11,12 @@
 #
 #   INDEX_DIR         Lucene index (contents + title fields)
 #                                         (default: data/s2orc_index; FULL_TEXT_INDEX_DIR also accepted)
+#   RAW_SOURCE        Where result records are read: s3 (default) or disk
+#   RAW_S3_MAP_PATH   s3: record -> S3 byte-range map from src/server/download_from_s3.sh
+#                     or repack_raw_to_s3.py (default: data/raw_s3_map.sqlite;
+#                     AWS credentials from the usual boto3 sources)
 #   ORIGINAL_DATA_PATH
-#                     Decompressed S2ORC .jsonl files (default: data/s2orc_papers)
-#   RAW_S3_MAP_PATH   SQLite map from src/server/repack_raw_to_s3.py; when set,
-#                     records are read from S3 and ORIGINAL_DATA_PATH is unused
-#                     (AWS credentials from the usual boto3 sources)
+#                     disk: decompressed S2ORC .jsonl files (default: data/s2orc_papers)
 #   DOI_MAP_PATH      SQLite DOI map from build_doi_map.py (default: data/doi_map.sqlite)
 #   HOST              Bind address        (default: 0.0.0.0)
 #   PORT              Port                (default: 8000)
@@ -33,7 +34,7 @@
 #   ./start.sh
 #   PORT=8001 WORKERS=2 ./start.sh
 #   SCHOLAR_API_KEYS=team-key-1,team-key-2 ./start.sh
-#   INDEX_DIR=/mnt/idx ORIGINAL_DATA_PATH=/mnt/s2orc ./start.sh
+#   RAW_SOURCE=disk ORIGINAL_DATA_PATH=/mnt/s2orc ./start.sh   # records from local .jsonl files
 #   ./start.sh --reload      # dev: restart workers when a loaded .py changes
 #                                     # (extra arguments are passed to gunicorn)
 #
@@ -107,21 +108,22 @@ run_py -c "import fastapi, gunicorn, uvicorn_worker, ujson, orjson, pyserini, St
 # Resolve the paths api.py will load (same defaults as api.py), so a missing
 # index fails here rather than as a stack trace from the server's startup hook.
 INDEX_DIR="${INDEX_DIR:-${FULL_TEXT_INDEX_DIR:-$REPO_ROOT/data/s2orc_index}}"
+RAW_SOURCE="${RAW_SOURCE:-s3}"
+RAW_S3_MAP_PATH="${RAW_S3_MAP_PATH:-$REPO_ROOT/data/raw_s3_map.sqlite}"
 ORIGINAL_DATA_PATH="${ORIGINAL_DATA_PATH:-$REPO_ROOT/data/s2orc_papers}"
 DOI_MAP_PATH="${DOI_MAP_PATH:-$REPO_ROOT/data/doi_map.sqlite}"
 [ -d "$INDEX_DIR" ] || fail "INDEX_DIR not found: $INDEX_DIR (build the index or set INDEX_DIR)"
-if [ -n "${RAW_S3_MAP_PATH:-}" ]; then
-    [ -f "$RAW_S3_MAP_PATH" ] || fail "RAW_S3_MAP_PATH not found: $RAW_S3_MAP_PATH (run src/server/repack_raw_to_s3.py)"
-else
-    [ -d "$ORIGINAL_DATA_PATH" ] || fail "ORIGINAL_DATA_PATH not found: $ORIGINAL_DATA_PATH (set ORIGINAL_DATA_PATH)"
-fi
+case "$RAW_SOURCE" in
+    s3)   [ -f "$RAW_S3_MAP_PATH" ] || fail "RAW_S3_MAP_PATH not found: $RAW_S3_MAP_PATH (run src/server/download_from_s3.sh, or set RAW_SOURCE=disk)" ;;
+    disk) [ -d "$ORIGINAL_DATA_PATH" ] || fail "ORIGINAL_DATA_PATH not found: $ORIGINAL_DATA_PATH (set ORIGINAL_DATA_PATH, or RAW_SOURCE=s3)" ;;
+    *)    fail "RAW_SOURCE must be s3 or disk, not '$RAW_SOURCE'" ;;
+esac
 printf '%-20s %s\n' "Python" "$PY_DESC"
 printf '%-20s %s\n' "INDEX_DIR" "$INDEX_DIR"
-if [ -n "${RAW_S3_MAP_PATH:-}" ]; then
-    printf '%-20s %s\n' "RAW_S3_MAP_PATH" "$RAW_S3_MAP_PATH  (records from S3)"
-    export RAW_S3_MAP_PATH
+if [ "$RAW_SOURCE" = s3 ]; then
+    printf '%-20s %s\n' "RAW_SOURCE" "s3 (map $RAW_S3_MAP_PATH)"
 else
-    printf '%-20s %s\n' "ORIGINAL_DATA_PATH" "$ORIGINAL_DATA_PATH"
+    printf '%-20s %s\n' "RAW_SOURCE" "disk ($ORIGINAL_DATA_PATH)"
 fi
 printf '%-20s %s\n' "DOI_MAP_PATH" "$DOI_MAP_PATH"
 
@@ -149,6 +151,6 @@ fi
 echo "Serving on:          http://$HOST:$PORT  (docs at /docs)"
 echo "Workers:             $WORKERS  (each ~1.3 GB; ready in ~15 s)"
 
-export HOST PORT WORKERS INDEX_DIR ORIGINAL_DATA_PATH DOI_MAP_PATH
+export HOST PORT WORKERS INDEX_DIR RAW_SOURCE RAW_S3_MAP_PATH ORIGINAL_DATA_PATH DOI_MAP_PATH
 export PYTHONUNBUFFERED=1   # worker log lines appear immediately
 exec run_py -m gunicorn -c "$APP_DIR/gunicorn.conf.py" api:app "$@"
